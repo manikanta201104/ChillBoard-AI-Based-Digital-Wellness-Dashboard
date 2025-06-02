@@ -1,0 +1,16 @@
+# Node.js
+node_modules/
+.env
+
+# React
+frontend/build/
+
+# Chrome Extension
+extension/build/
+
+# Logs
+*.log
+
+# System
+.DS_Store
+Thumbs.db
