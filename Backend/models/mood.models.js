@@ -22,6 +22,7 @@ const moodSchema = new mongoose.Schema (
       max: 100,
     },
   },
+  
   {timestamps: true}
 );
 

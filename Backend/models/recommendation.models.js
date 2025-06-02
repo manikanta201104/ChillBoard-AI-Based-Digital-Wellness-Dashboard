@@ -30,4 +30,5 @@ const recommendationSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
+
 export const Recommendation = mongoose.model("Recommendation", recommendationSchema);

@@ -36,6 +36,7 @@ const playlistSchema = new mongoose.Schema (
   {timestamps: true}
 );
 
+
 // Optional: Add a compound unique index for (userId + name)
 playlistSchema.index ({userId: 1, name: 1}, {unique: true});
 

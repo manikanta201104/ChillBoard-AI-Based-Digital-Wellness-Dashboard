@@ -11,6 +11,7 @@ const challengeParticipantSchema = new mongoose.Schema({
     ref: "Challenge",
     required: true,
   },
+  
   joinedAt: {
     type: Date,
     required: true,

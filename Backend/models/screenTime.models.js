@@ -32,3 +32,4 @@ const screenTimeSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 export const ScreenTime = mongoose.model("ScreenTime", screenTimeSchema);
+
