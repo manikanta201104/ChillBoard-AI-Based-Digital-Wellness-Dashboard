@@ -1,11 +1,11 @@
 {
   "name": "backend",
   "version": "1.0.0",
-  "main": "server.js",
+  "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-modules server.js",
-    "dev": "nodemon --exec node --experimental-modules server.js",
+    "start": "node --experimental-modules index.js",
+    "dev": "nodemon --exec node --experimental-modules index.js",
     "build": "echo \"Building the backend...\"",
     "lint": "eslint .",
     "format": "prettier --write .",
