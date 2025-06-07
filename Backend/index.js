@@ -7,6 +7,7 @@ import connectDB from './db/index.js';
 import {config} from './config/env.js';
 import mongoose from 'mongoose';
 import testRouter from './routes/test.js';
+import authRouter from './routes/auth.js';
 
 const logger = winston.createLogger ({
   level: 'info',
@@ -30,6 +31,7 @@ app.use (express.json ());
 
 app.use ('/health', healthRouter);
 app.use ('/test-user', testRouter);
+app.use('/auth', authRouter);
 
 app.use ((err, req, res, next) => {
   logger.error (err.stack);
