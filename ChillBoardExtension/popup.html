@@ -2,13 +2,25 @@
 <html>
 <head>
   <title>ChillBoard</title>
-  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <h1>ChillBoard Stats</h1>
-  <div id="screenTime">Screen time: Loading...</div>
-  <div id="tabCount">Tabs open: Loading...</div>
-  <button id="webAppButton">Go to ChillBoard</button>
+  <div id="login-container">
+    <h2>Login to ChillBoard</h2>
+    <input type="email" id="email" placeholder="Email" />
+    <input type="password" id="password" placeholder="Password" />
+    <button id="login-btn">Login</button>
+    <p id="login-error" class="error"></p>
+  </div>
+
+  <div id="stats-container" style="display: none;">
+    <h2>ChillBoard Stats</h2>
+    <p>Screen time: <span id="total-time">0</span></p>
+    <p>Sites visited: <span id="tab-count">0</span></p>
+    <button id="open-webapp-btn">Open Web App</button>
+    <button id="logout-btn">Logout</button>
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>

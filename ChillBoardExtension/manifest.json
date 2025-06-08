@@ -3,11 +3,19 @@
   "name": "ChillBoard Extension",
   "version": "1.0",
   "description": "Tracks screen time for ChillBoard wellness dashboard",
-  "permissions": ["tabs", "windows", "storage"],
+  "permissions": [
+    "tabs", 
+    "windows", 
+    "storage",
+    "alarms"
+  ],
+  "host_permissions": [
+    "http://localhost:5000/*"
+  ],
   "background": {
     "service_worker": "background.js"
   },
   "action": {
-  "default_popup": "popup.html"
-}
+    "default_popup": "popup.html"
+  }
 }

@@ -1,7 +1,13 @@
 import mongoose from 'mongoose';
-import {type} from './../../node_modules/@types/whatwg-url/index.d';
 
-const screenTimeSchema = new mongoose.Schema (
+// Define tabsSchema if you are embedding an array of tab objects
+const tabsSchema = new mongoose.Schema({
+  url: String,
+  title: String,
+  timeSpent: Number,
+}, { _id: false });
+
+const screenTimeSchema = new mongoose.Schema(
   {
     screenTimeId: {
       type: String,
@@ -23,11 +29,10 @@ const screenTimeSchema = new mongoose.Schema (
     },
     tabs: [tabsSchema],
   },
-  {timestamps: true}
+  { timestamps: true }
 );
 
-screenTimeSchema.index ({screenTimeId: 1});
-screenTimeSchema.index ({userId: 1, date: 1});
+screenTimeSchema.index({ screenTimeId: 1 });
+screenTimeSchema.index({ userId: 1, date: 1 });
 
-export default mongoose.model('ScreenTime',screenTimeSchema);
-
+export default mongoose.model('ScreenTime', screenTimeSchema);
