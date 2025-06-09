@@ -4,8 +4,8 @@
   "version": "1.0",
   "description": "Tracks screen time for ChillBoard wellness dashboard",
   "permissions": [
-    "tabs", 
-    "windows", 
+    "tabs",
+    "windows",
     "storage",
     "alarms"
   ],
