@@ -9,6 +9,7 @@ import mongoose from 'mongoose';
 import testRouter from './routes/test.js';
 import authRouter from './routes/auth.js';
 import screenTimeRouter from './routes/screenTime.js';
+import testMoodRouter from './routes/testMood.js';  
 
 const logger = winston.createLogger ({
   level: 'info',
@@ -34,6 +35,7 @@ app.use ('/health', healthRouter);
 app.use ('/test-user', testRouter);
 app.use('/auth', authRouter);
 app.use('/screen-time', screenTimeRouter);
+app.use('/test-mood',testMoodRouter);
 
 app.use ((err, req, res, next) => {
   logger.error (err.stack);

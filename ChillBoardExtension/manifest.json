@@ -4,13 +4,16 @@
   "version": "1.0",
   "description": "Tracks screen time for ChillBoard wellness dashboard",
   "permissions": [
+    "storage",
     "tabs",
     "windows",
-    "storage",
-    "alarms"
+    "notifications",
+    "alarms",
+    "activeTab"
   ],
   "host_permissions": [
-    "http://localhost:5000/*"
+    "http://localhost:5000/*",
+    "http://localhost:3000/*"
   ],
   "background": {
     "service_worker": "background.js"

@@ -158,14 +158,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// ... (Previous code remains unchanged until the syncData function)
+
 async function syncData() {
   console.log('Starting data sync');
   chrome.storage.local.get(['jwt', 'totalTime', 'tabUsage', 'offlineQueue'], async result => {
-    const jwt = result.jwt;
+    let jwt = result.jwt;
     const totalTime = result.totalTime || 0;
     let tabs = result.tabUsage || [];
     const queue = result.offlineQueue || [];
 
+    // Distribute unaccounted time
     const totalTabTime = tabs.reduce((sum, tab) => sum + (tab.timeSpent || 0), 0);
     const unaccountedTime = totalTime - totalTabTime;
     if (unaccountedTime > 0 && tabs.length > 0) {
@@ -176,7 +179,10 @@ async function syncData() {
     const dataToSync = [...queue, { totalTime, tabs }];
 
     if (!jwt) {
-      console.log('No JWT found, skipping sync');
+      console.log('No JWT found, saving to queue');
+      queue.push({ totalTime, tabs });
+      chrome.storage.local.set({ offlineQueue: queue });
+      notifyUser('Authentication required. Please log in via the web app.');
       return;
     }
 
@@ -188,6 +194,16 @@ async function syncData() {
     }
 
     try {
+      // Attempt to refresh the token before syncing
+      jwt = await refreshToken(jwt);
+      if (!jwt) {
+        console.log('Token refresh failed, saving to queue');
+        queue.push({ totalTime, tabs });
+        chrome.storage.local.set({ offlineQueue: queue });
+        notifyUser('Session expired. Please log in again.');
+        return;
+      }
+
       for (const item of dataToSync) {
         const res = await fetch('http://localhost:5000/screen-time', {
           method: 'POST',
@@ -199,18 +215,81 @@ async function syncData() {
         });
 
         if (!res.ok) {
-          const error = await res.text();
-          throw new Error(`Sync failed: ${error}`);
+          const error = await res.json();
+          if (error.message === 'Invalid or expired token') {
+            console.log('Invalid token detected, attempting refresh');
+            jwt = await refreshToken(jwt);
+            if (!jwt) {
+              throw new Error('Token refresh failed');
+            }
+            // Retry the request with the new token
+            const retryRes = await fetch('http://localhost:5000/screen-time', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${jwt}`
+              },
+              body: JSON.stringify(item)
+            });
+            if (!retryRes.ok) {
+              throw new Error(`Retry failed: ${await retryRes.text()}`);
+            }
+          } else {
+            throw new Error(`Sync failed: ${JSON.stringify(error)}`);
+          }
         }
       }
 
       console.log('✅ Data synced');
+      // Only clear storage after successful sync
       chrome.storage.local.set({ totalTime: 0, tabUsage: [], offlineQueue: [] });
 
     } catch (err) {
       console.error('Sync failed:', err.message);
       chrome.storage.local.set({ offlineQueue: dataToSync });
+      notifyUser('Failed to sync data. Data will be synced when connection is restored.');
     }
+  });
+}
+
+// Helper function to refresh the JWT (adjust endpoint as needed)
+async function refreshToken(currentJwt) {
+  try {
+    const res = await fetch('http://localhost:5000/refresh-token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${currentJwt}`
+      }
+    });
+
+    if (!res.ok) {
+      throw new Error('Token refresh failed');
+    }
+
+    const data = await res.json();
+    const newJwt = data.token;
+    if (newJwt) {
+      chrome.storage.local.set({ jwt: newJwt });
+      console.log('Token refreshed successfully');
+      return newJwt;
+    } else {
+      throw new Error('No token returned from refresh endpoint');
+    }
+  } catch (err) {
+    console.error('Token refresh error:', err.message);
+    return null;
+  }
+}
+
+// Helper function to notify the user
+function notifyUser(message) {
+  chrome.notifications.create({
+    type: 'basic',
+    iconUrl: 'icon.png', // Ensure you have an icon.png in your extension
+    title: 'Screen Time Extension',
+    message: message,
+    priority: 2
   });
 }
 
@@ -218,3 +297,4 @@ self.addEventListener('online', () => {
   console.log('Back online, syncing...');
   syncData();
 });
+
