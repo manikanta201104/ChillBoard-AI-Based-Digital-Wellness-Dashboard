@@ -34,15 +34,20 @@ export const login = async (userData) => {
   }
   return response.data;
 };
-
 export const getScreenTime = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-
   const response = await api.get('/screen-time', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+};
+
+export const sendMood = async (mood, confidence) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.post('/test-mood', { mood, confidence }, {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };

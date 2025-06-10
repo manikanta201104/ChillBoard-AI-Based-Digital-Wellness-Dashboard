@@ -1,19 +1,28 @@
 /*global chrome*/
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
-import ChartDataLabels from 'chartjs-plugin-datalabels';
-import { getScreenTime } from '../utils/api';
+import * as faceapi from 'face-api.js';
+import { getScreenTime, sendMood } from '../utils/api';
 
-ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale, ChartDataLabels);
+ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
+
+const MODEL_URL = '/models'; // Local models
+const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/'; // CDN fallback
 
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
   const [error, setError] = useState('');
   const [extensionInstalled, setExtensionInstalled] = useState(true);
+  const [webcamEnabled, setWebcamEnabled] = useState(false);
+  const [detectedMood, setDetectedMood] = useState('Detecting mood...');
+  const [detectionAttempts, setDetectionAttempts] = useState(0);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const detectionIntervalRef = useRef(null);
 
   useEffect(() => {
-    // Fetch screen time data
     const fetchData = async () => {
       try {
         const data = await getScreenTime();
@@ -25,9 +34,8 @@ const Dashboard = () => {
 
     fetchData();
 
-    // Check if extension is installed
     if (window.chrome && chrome.runtime) {
-      chrome.runtime.sendMessage('your_extension_id_here', { message: 'ping' }, (response) => {
+      chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
         if (chrome.runtime.lastError || !response) {
           setExtensionInstalled(false);
         }
@@ -35,58 +43,167 @@ const Dashboard = () => {
     } else {
       setExtensionInstalled(false);
     }
+
+    const loadModels = async () => {
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        console.log('TinyFaceDetector loaded');
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        console.log('FaceLandmark68Net loaded');
+        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+        console.log('FaceExpressionNet loaded');
+        setModelsLoaded(true);
+      } catch (err) {
+        console.warn('Failed to load local models:', err);
+        try {
+          await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
+          console.log('Face-API.js models loaded from CDN');
+          setModelsLoaded(true);
+        } catch (cdnErr) {
+          console.error('Error loading models from CDN:', cdnErr);
+          setError('Failed to load emotion detection models.');
+        }
+      }
+    };
+
+    loadModels();
+
+    return () => {
+      stopWebcam();
+    };
   }, []);
 
-  // Helper function to format seconds into hh:mm:ss
-  const formatTime = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
-    return [
-      hrs > 0 ? `${hrs}h` : '',
-      mins > 0 ? `${mins}m` : '',
-      `${secs}s`
-    ].filter(Boolean).join(' ');
-  };
-
-  // Helper function to format seconds into hh:mm (no seconds)
-  const formatTimeNoSeconds = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    return [
-      hrs > 0 ? `${hrs}h` : '',
-      mins > 0 ? `${mins}m` : '',
-    ].filter(Boolean).join(' ') || '0m';
-  };
-
-  // Summary stats for today
-  const today = new Date().toLocaleDateString();
-  const todayData = screenTimeData.filter(
-    (entry) => new Date(entry.date).toLocaleDateString() === today
-  );
-
-  const todayScreenTime = todayData.reduce((sum, entry) => sum + entry.totalTime, 0);
-  const todaySites = new Set(
-    todayData.flatMap((entry) => entry.tabs.map((tab) => tab.url))
-  ).size;
-
-  // Aggregate screen time data by day for the bar chart
-  const dailyScreenTimeMap = {};
-  screenTimeData.forEach((entry) => {
-    const date = new Date(entry.date).toLocaleDateString();
-    if (dailyScreenTimeMap[date]) {
-      dailyScreenTimeMap[date] += entry.totalTime;
-    } else {
-      dailyScreenTimeMap[date] = entry.totalTime;
+  const startWebcam = async () => {
+    if (!modelsLoaded) {
+      setError('Models are still loading, please wait...');
+      return;
     }
-  });
+
+    if (!videoRef.current) {
+      console.error('Video element not found in DOM');
+      setError('Video element not found. Please refresh the page.');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      streamRef.current = stream;
+      console.log('Webcam stream obtained:', stream);
+      videoRef.current.srcObject = stream;
+      videoRef.current.onloadedmetadata = () => {
+        console.log('Video metadata loaded');
+        videoRef.current.play().then(() => {
+          console.log('Video playback started');
+          setWebcamEnabled(true);
+        }).catch(err => {
+          console.error('Error playing video:', err);
+          setError('Failed to play webcam video.');
+          stopWebcam();
+        });
+      };
+    } catch (err) {
+      console.error('Error accessing webcam:', err);
+      if (err.name === 'NotAllowedError') {
+        setError('Webcam access denied. Please grant camera permission in browser settings.');
+      } else if (err.name === 'NotFoundError') {
+        setError('No webcam found. Please connect a webcam and try again.');
+      } else {
+        setError('Failed to access webcam: ' + err.message);
+      }
+      setWebcamEnabled(false);
+    }
+  };
+
+  const stopWebcam = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+      console.log('Webcam stream stopped');
+    }
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
+      detectionIntervalRef.current = null;
+    }
+    setWebcamEnabled(false);
+    setDetectedMood('Detecting mood...');
+    setDetectionAttempts(0);
+  };
+
+  useEffect(() => {
+    if (webcamEnabled && videoRef.current) {
+      console.log('Starting emotion detection');
+      detectionIntervalRef.current = setInterval(async () => {
+        try {
+          const detection = await faceapi
+            .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+            .withFaceLandmarks()
+            .withFaceExpressions();
+
+          setDetectionAttempts(prev => prev + 1);
+
+          if (detection && detection.expressions) {
+            const expressions = detection.expressions;
+            console.log('Detected expressions:', expressions);
+            const moodMap = {
+              happy: expressions.happy || 0,
+              sad: expressions.sad || 0,
+              angry: expressions.angry || 0,
+              stressed: expressions.fearful || 0, // Map 'fearful' to 'stressed'
+              calm: expressions.neutral || 0, // Map 'neutral' to 'calm'
+              neutral: expressions.neutral || 0,
+              surprised: expressions.surprised || 0, // Map to 'happy'
+              disgusted: expressions.disgusted || 0 // Map to 'angry'
+            };
+            const emotions = Object.keys(moodMap).map(key => ({
+              mood: key === 'surprised' ? 'happy' : key === 'disgusted' ? 'angry' : key,
+              confidence: moodMap[key]
+            }));
+            const dominantEmotion = emotions.reduce((prev, current) =>
+              prev.confidence > current.confidence ? prev : current
+            );
+            setDetectedMood(`You seem ${dominantEmotion.mood} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`);
+
+            // Send to backend (prepare for Day 14)
+            try {
+              await sendMood(dominantEmotion.mood, dominantEmotion.confidence);
+              console.log('Mood sent:', { mood: dominantEmotion.mood, confidence: dominantEmotion.confidence });
+            } catch (err) {
+              console.error('Error sending mood:', err);
+              setError('Failed to send mood data.');
+            }
+
+            setDetectionAttempts(0);
+          } else {
+            console.log('No face detected');
+            setDetectedMood('No face detected. Please center your face in the frame.');
+
+            if (detectionAttempts >= 10) {
+              setDetectedMood('Still no face detected. Ensure good lighting and face the camera directly.');
+            }
+          }
+        } catch (err) {
+          console.error('Error during emotion detection:', err);
+          setDetectedMood('Error detecting emotions');
+        }
+      }, 500);
+
+      return () => {
+        if (detectionIntervalRef.current) {
+          clearInterval(detectionIntervalRef.current);
+          console.log('Emotion detection stopped');
+        }
+      };
+    }
+  }, [webcamEnabled, detectionAttempts]);
 
   const barChartData = {
-    labels: Object.keys(dailyScreenTimeMap),
+    labels: screenTimeData.map((entry) => new Date(entry.date).toLocaleDateString()),
     datasets: [
       {
         label: 'Screen Time (minutes)',
-        data: Object.values(dailyScreenTimeMap).map((totalTime) => Math.floor(totalTime / 60)),
+        data: screenTimeData.map((entry) => Math.floor(entry.totalTime / 60)),
         backgroundColor: 'rgba(54, 162, 235, 0.6)',
         borderColor: 'rgba(54, 162, 235, 1)',
         borderWidth: 1,
@@ -94,45 +211,12 @@ const Dashboard = () => {
     ],
   };
 
-  const barChartOptions = {
-    responsive: true,
-    plugins: {
-      legend: { position: 'top' },
-      datalabels: {
-        color: '#000',
-        anchor: 'end',
-        align: 'top',
-        formatter: (value) => `${value}m`,
-      },
-      tooltip: {
-        callbacks: {
-          label: (context) => {
-            const seconds = Object.values(dailyScreenTimeMap)[context.dataIndex];
-            return `Screen Time: ${formatTime(seconds)}`;
-          },
-        },
-      },
-    },
-  };
-
-  // Aggregate tab usage across all ScreenTime entries for the pie chart
-  const tabUsageMap = {};
-  screenTimeData.forEach((entry) => {
-    entry.tabs.forEach((tab) => {
-      if (tabUsageMap[tab.url]) {
-        tabUsageMap[tab.url] += tab.timeSpent || 0;
-      } else {
-        tabUsageMap[tab.url] = tab.timeSpent || 0;
-      }
-    });
-  });
-
   const pieChartData = {
-    labels: Object.keys(tabUsageMap),
+    labels: [],
     datasets: [
       {
         label: 'Tab Usage (seconds)',
-        data: Object.values(tabUsageMap),
+        data: [],
         backgroundColor: [
           'rgba(255, 99, 132, 0.6)',
           'rgba(54, 162, 235, 0.6)',
@@ -140,12 +224,6 @@ const Dashboard = () => {
           'rgba(75, 192, 192, 0.6)',
           'rgba(153, 102, 255, 0.6)',
           'rgba(255, 159, 64, 0.6)',
-          'rgba(255, 99, 132, 0.4)',
-          'rgba(54, 162, 235, 0.4)',
-          'rgba(255, 206, 86, 0.4)',
-          'rgba(75, 192, 192, 0.4)',
-          'rgba(153, 102, 255, 0.4)',
-          'rgba(255, 159, 64, 0.4)',
         ],
         borderColor: [
           'rgba(255, 99, 132, 1)',
@@ -154,65 +232,34 @@ const Dashboard = () => {
           'rgba(75, 192, 192, 1)',
           'rgba(153, 102, 255, 1)',
           'rgba(255, 159, 64, 1)',
-          'rgba(255, 99, 132, 1)',
-          'rgba(54, 162, 235, 1)',
-          'rgba(255, 206, 86, 1)',
-          'rgba(75, 192, 192, 1)',
-          'rgba(153, 102, 255, 1)',
-          'rgba(255, 159, 64, 1)',
         ],
         borderWidth: 1,
       },
     ],
   };
 
-  const pieChartOptions = {
-    responsive: true,
-    plugins: {
-      legend: { position: 'top' },
-      datalabels: {
-        color: '#000',
-        formatter: (value) => formatTime(value),
-        anchor: 'center',
-        align: 'center',
-        font: { size: 10 },
-      },
-      tooltip: {
-        callbacks: {
-          label: (context) => {
-            const seconds = context.raw;
-            return `${context.label}: ${formatTimeNoSeconds(seconds)}`;
-          },
-        },
-      },
-    },
-  };
+  const tabUsageMap = {};
+  screenTimeData.forEach((entry) => {
+    entry.tabs.forEach((tab) => {
+      if (tabUsageMap[tab.url]) {
+        tabUsageMap[tab.url] += tab.timeSpent;
+      } else {
+        tabUsageMap[tab.url] = tab.timeSpent;
+      }
+    });
+  });
+
+  pieChartData.labels = Object.keys(tabUsageMap);
+  pieChartData.datasets[0].data = Object.values(tabUsageMap);
 
   const handleInstallReminder = () => {
     alert('Please install the ChillBoard Chrome extension to track your screen time!');
     window.open('https://chrome.google.com/webstore', '_blank');
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('jwt');
-    window.location.href = '/';
-  };
-
-  const handleOpenWebApp = () => {
-    window.open('http://localhost:3000', '_blank');
-  };
-
   return (
     <div className="min-h-screen bg-gray-100 p-6">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-4xl font-bold text-center">ChillBoard Dashboard</h1>
-        <button
-          onClick={handleLogout}
-          className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600 transition"
-        >
-          Logout
-        </button>
-      </div>
+      <h1 className="text-4xl font-bold text-center mb-8">ChillBoard Dashboard</h1>
 
       {error && <p className="text-red-500 text-center mb-4">{error}</p>}
 
@@ -228,51 +275,52 @@ const Dashboard = () => {
         </div>
       )}
 
-      {screenTimeData.length === 0 && !error ? (
-        <p className="text-gray-500 text-center mb-8">
-          No screen time data available. Start using the app to track your activity!
-        </p>
-      ) : (
-        <>
-          <div className="bg-white p-6 rounded-lg shadow-md mb-8">
-            <h2 className="text-2xl font-semibold mb-4">ChillBoard Stats (Today)</h2>
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-lg">
-                  Screen time: {formatTimeNoSeconds(todayScreenTime)}
-                </p>
-                <p className="text-lg">Sites visited: {todaySites}</p>
-              </div>
-              <button
-                onClick={handleOpenWebApp}
-                className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
-              >
-                Open Web App
-              </button>
-            </div>
-          </div>
+      <div className="mb-8 text-center">
+        <button
+          onClick={webcamEnabled ? stopWebcam : startWebcam}
+          className={`px-4 py-2 rounded transition ${
+            webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'
+          } text-white`}
+          disabled={!modelsLoaded}
+        >
+          {webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}
+        </button>
+      </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h2 className="text-2xl font-semibold mb-4">Daily Screen Time (Last 7 Days)</h2>
-              {barChartData.labels.length > 0 ? (
-                <Bar data={barChartData} options={barChartOptions} />
-              ) : (
-                <p className="text-gray-500">No screen time data available.</p>
-              )}
-            </div>
+      <div className="mb-8 flex justify-center">
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'}`}
+        />
+      </div>
 
-            <div className="bg-white p-6 rounded-lg shadow-md">
-              <h2 className="text-2xl font-semibold mb-4">Tab Usage</h2>
-              {pieChartData.labels.length > 0 ? (
-                <Pie data={pieChartData} options={pieChartOptions} />
-              ) : (
-                <p className="text-gray-500">No tab usage data available.</p>
-              )}
-            </div>
-          </div>
-        </>
+      {webcamEnabled && (
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md">
+          <p className="text-xl font-semibold text-gray-800">{detectedMood}</p>
+        </div>
       )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Daily Screen Time</h2>
+          {screenTimeData.length > 0 ? (
+            <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} />
+          ) : (
+            <p className="text-gray-500">No screen time data available.</p>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-lg shadow-md">
+          <h2 className="text-2xl font-semibold mb-4">Tab Usage</h2>
+          {pieChartData.labels.length > 0 ? (
+            <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} />
+          ) : (
+            <p className="text-gray-500">No tab usage data available.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
