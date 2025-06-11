@@ -1,3 +1,4 @@
+
 /*global chrome*/
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
@@ -18,9 +19,12 @@ const Dashboard = () => {
   const [detectedMood, setDetectedMood] = useState('Detecting mood...');
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [correctedMood, setCorrectedMood] = useState('');
+  const [lastSavedMood, setLastSavedMood] = useState(null);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const detectionIntervalRef = useRef(null);
+  const lastSentRef = useRef(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -129,6 +133,41 @@ const Dashboard = () => {
     setWebcamEnabled(false);
     setDetectedMood('Detecting mood...');
     setDetectionAttempts(0);
+    setCorrectedMood('');
+    setLastSavedMood(null);
+  };
+
+  const handleMoodCorrection = async (e) => {
+    const newMood = e.target.value;
+    setCorrectedMood(newMood);
+
+    // Only send the corrected mood if a valid mood is selected
+    if (!newMood) {
+      console.log('No mood selected, skipping send.');
+      return;
+    }
+
+    // Send corrected mood immediately
+    try {
+      const moodToSend = { mood: newMood, confidence: 1.0 };
+      console.log('Sending corrected mood:', moodToSend); // Debug log
+      await sendMood(moodToSend);
+      console.log('Corrected mood sent:', moodToSend);
+      setLastSavedMood(moodToSend);
+      lastSentRef.current = Date.now();
+
+      // Simulate TriggerLink
+      const triggerLink = {
+        fromSource: 'mood',
+        data: { mood: newMood, confidence: 1.0, timestamp: new Date().toISOString() },
+      };
+      console.log('TriggerLink:', triggerLink);
+
+      setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
+    } catch (err) {
+      console.error('Error saving corrected mood:', err);
+      setError('Failed to save corrected mood');
+    }
   };
 
   useEffect(() => {
@@ -150,11 +189,11 @@ const Dashboard = () => {
               happy: expressions.happy || 0,
               sad: expressions.sad || 0,
               angry: expressions.angry || 0,
-              stressed: expressions.fearful || 0, // Map 'fearful' to 'stressed'
-              calm: expressions.neutral || 0, // Map 'neutral' to 'calm'
+              stressed: expressions.fearful || 0,
+              calm: expressions.neutral || 0,
               neutral: expressions.neutral || 0,
-              surprised: expressions.surprised || 0, // Map to 'happy'
-              disgusted: expressions.disgusted || 0 // Map to 'angry'
+              surprised: expressions.surprised || 0,
+              disgusted: expressions.disgusted || 0
             };
             const emotions = Object.keys(moodMap).map(key => ({
               mood: key === 'surprised' ? 'happy' : key === 'disgusted' ? 'angry' : key,
@@ -163,15 +202,50 @@ const Dashboard = () => {
             const dominantEmotion = emotions.reduce((prev, current) =>
               prev.confidence > current.confidence ? prev : current
             );
-            setDetectedMood(`You seem ${dominantEmotion.mood} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`);
 
-            // Send to backend (prepare for Day 14)
-            try {
-              await sendMood(dominantEmotion.mood, dominantEmotion.confidence);
-              console.log('Mood sent:', { mood: dominantEmotion.mood, confidence: dominantEmotion.confidence });
-            } catch (err) {
-              console.error('Error sending mood:', err);
-              setError('Failed to send mood data.');
+            const moodText = correctedMood || dominantEmotion.mood;
+            setDetectedMood(`You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`);
+
+            // Send mood to backend every 10 seconds
+            const now = Date.now();
+            const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
+
+            // Debug: Log the time difference and state before checking condition
+            console.log('Checking if mood should be sent...');
+            console.log('Current time (now):', now);
+            console.log('Last sent time (lastSentRef):', lastSentRef.current);
+            console.log('Time since last send (ms):', now - lastSentRef.current);
+            console.log('Last saved mood:', lastSavedMood);
+            console.log('Current mood to send:', moodToSend);
+
+            if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
+              try {
+                console.log('Condition passed, sending mood...');
+                await sendMood(moodToSend);
+                console.log('Mood sent:', moodToSend);
+                setLastSavedMood(moodToSend);
+                lastSentRef.current = now;
+
+                // Debug: Log after sending
+                console.log('Updated lastSentRef:', lastSentRef.current);
+                console.log('Updated lastSavedMood:', lastSavedMood);
+
+                // Simulate TriggerLink
+                const triggerLink = {
+                  fromSource: 'mood',
+                  data: { mood: moodToSend.mood, confidence: moodToSend.confidence, timestamp: new Date().toISOString() },
+                };
+                console.log('TriggerLink:', triggerLink);
+              } catch (err) {
+                console.error('Error sending mood:', err);
+                setError('Failed to send mood data.');
+                // Update lastSentRef even on failure to prevent immediate retry
+                lastSentRef.current = now;
+                console.log('Error occurred, but updated lastSentRef to prevent immediate retry:', lastSentRef.current);
+              }
+            } else {
+              console.log('Condition not met, skipping send.');
+              console.log('Reason:', now - lastSentRef.current < 10000 ? 'Not enough time has passed' : 'Mood unchanged');
             }
 
             setDetectionAttempts(0);
@@ -196,7 +270,7 @@ const Dashboard = () => {
         }
       };
     }
-  }, [webcamEnabled, detectionAttempts]);
+  }, [webcamEnabled, detectionAttempts, correctedMood]);
 
   const barChartData = {
     labels: screenTimeData.map((entry) => new Date(entry.date).toLocaleDateString()),
@@ -299,6 +373,24 @@ const Dashboard = () => {
       {webcamEnabled && (
         <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md">
           <p className="text-xl font-semibold text-gray-800">{detectedMood}</p>
+          {detectedMood && !detectedMood.includes('No face') && !detectedMood.includes('Error') && (
+            <div className="mt-4">
+              <label className="text-gray-600">Not correct? Select another mood: </label>
+              <select
+                value={correctedMood}
+                onChange={handleMoodCorrection}
+                className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Select mood</option>
+                <option value="happy">Happy</option>
+                <option value="sad">Sad</option>
+                <option value="angry">Angry</option>
+                <option value="stressed">Stressed</option>
+                <option value="calm">Calm</option>
+                <option value="neutral">Neutral</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
 

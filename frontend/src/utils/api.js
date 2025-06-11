@@ -34,6 +34,7 @@ export const login = async (userData) => {
   }
   return response.data;
 };
+
 export const getScreenTime = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
@@ -43,11 +44,14 @@ export const getScreenTime = async () => {
   return response.data;
 };
 
-export const sendMood = async (mood, confidence) => {
+export const sendMood = async (moodData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.post('/test-mood', { mood, confidence }, {
-    headers: { Authorization: `Bearer ${token}` },
+
+  const response = await api.post('/mood', moodData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
   return response.data;
 };
