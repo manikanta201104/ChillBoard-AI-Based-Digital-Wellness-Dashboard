@@ -8,10 +8,10 @@ const recommendationSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ['break', 'exercise', 'playlist', 'challenge', 'notification'],
+      enum: ['break', 'exercise', 'playlist', 'challenge', 'notification', 'message'], // Added 'message'
     },
     details: { type: String, required: true },
-    trigger: { type: String, required: true }, // e.g., "screenTime", "mood"
+    trigger: { type: String, required: true },
     accepted: { type: Boolean, default: false },
   },
   { timestamps: true }

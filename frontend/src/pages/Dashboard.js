@@ -1,4 +1,3 @@
-
 /*global chrome*/
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
@@ -141,22 +140,19 @@ const Dashboard = () => {
     const newMood = e.target.value;
     setCorrectedMood(newMood);
 
-    // Only send the corrected mood if a valid mood is selected
     if (!newMood) {
       console.log('No mood selected, skipping send.');
       return;
     }
 
-    // Send corrected mood immediately
     try {
       const moodToSend = { mood: newMood, confidence: 1.0 };
-      console.log('Sending corrected mood:', moodToSend); // Debug log
+      console.log('Sending corrected mood:', moodToSend);
       await sendMood(moodToSend);
       console.log('Corrected mood sent:', moodToSend);
       setLastSavedMood(moodToSend);
       lastSentRef.current = Date.now();
 
-      // Simulate TriggerLink
       const triggerLink = {
         fromSource: 'mood',
         data: { mood: newMood, confidence: 1.0, timestamp: new Date().toISOString() },
@@ -206,31 +202,22 @@ const Dashboard = () => {
             const moodText = correctedMood || dominantEmotion.mood;
             setDetectedMood(`You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`);
 
-            // Send mood to backend every 10 seconds
             const now = Date.now();
             const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
 
-            // Debug: Log the time difference and state before checking condition
             console.log('Checking if mood should be sent...');
-            console.log('Current time (now):', now);
-            console.log('Last sent time (lastSentRef):', lastSentRef.current);
             console.log('Time since last send (ms):', now - lastSentRef.current);
             console.log('Last saved mood:', lastSavedMood);
             console.log('Current mood to send:', moodToSend);
 
             if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
               try {
-                console.log('Condition passed, sending mood...');
+                console.log('Sending mood:', moodToSend);
                 await sendMood(moodToSend);
                 console.log('Mood sent:', moodToSend);
                 setLastSavedMood(moodToSend);
                 lastSentRef.current = now;
 
-                // Debug: Log after sending
-                console.log('Updated lastSentRef:', lastSentRef.current);
-                console.log('Updated lastSavedMood:', lastSavedMood);
-
-                // Simulate TriggerLink
                 const triggerLink = {
                   fromSource: 'mood',
                   data: { mood: moodToSend.mood, confidence: moodToSend.confidence, timestamp: new Date().toISOString() },
@@ -239,13 +226,10 @@ const Dashboard = () => {
               } catch (err) {
                 console.error('Error sending mood:', err);
                 setError('Failed to send mood data.');
-                // Update lastSentRef even on failure to prevent immediate retry
                 lastSentRef.current = now;
-                console.log('Error occurred, but updated lastSentRef to prevent immediate retry:', lastSentRef.current);
               }
             } else {
-              console.log('Condition not met, skipping send.');
-              console.log('Reason:', now - lastSentRef.current < 10000 ? 'Not enough time has passed' : 'Mood unchanged');
+              console.log('Mood not sent: time threshold not met or mood unchanged');
             }
 
             setDetectionAttempts(0);

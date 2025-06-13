@@ -1,38 +1,41 @@
-import mongoose from 'mongoose';
 
-// Define tabsSchema if you are embedding an array of tab objects
-const tabsSchema = new mongoose.Schema({
-  url: String,
-  title: String,
-  timeSpent: Number,
-}, { _id: false });
+  import mongoose from 'mongoose';
 
-const screenTimeSchema = new mongoose.Schema(
-  {
-    screenTimeId: {
-      type: String,
-      required: true,
-      unique: true,
+  const tabsSchema = new mongoose.Schema(
+    {
+      url: String,
+      title: String,
+      timeSpent: Number,
     },
-    userId: {
-      type: mongoose.Schema.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    date: {
-      type: Date,
-      required: true,
-    },
-    totalTime: {
-      type: Number,
-      required: true,
-    },
-    tabs: [tabsSchema],
-  },
-  { timestamps: true }
-);
+    { _id: false }
+  );
 
-screenTimeSchema.index({ screenTimeId: 1 });
-screenTimeSchema.index({ userId: 1, date: 1 });
+  const screenTimeSchema = new mongoose.Schema(
+    {
+      screenTimeId: {
+        type: String,
+        required: true,
+        unique: true, // This creates an index
+      },
+      userId: {
+        type: String,
+        required: true,
+      },
+      date: {
+        type: Date,
+        required: true,
+      },
+      totalTime: {
+        type: Number,
+        required: true,
+      },
+      tabs: [tabsSchema],
+    },
+    { timestamps: true }
+  );
 
-export default mongoose.model('ScreenTime', screenTimeSchema);
+  // Removed duplicate index since unique: true already creates one
+  screenTimeSchema.index({ userId: 1, date: 1 });
+
+  export default mongoose.model('ScreenTime', screenTimeSchema);
+  

@@ -1,4 +1,4 @@
-// Initial Setup and DOM Elements
+
 document.addEventListener('DOMContentLoaded', () => {
   const loginContainer = document.getElementById('login-container');
   const statsContainer = document.getElementById('stats-container');
@@ -11,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const emailInput = document.getElementById('email');
   const passwordInput = document.getElementById('password');
 
-  // Check Login Status on Load
   chrome.storage.local.get(['jwt'], (result) => {
     if (result.jwt) {
       showStats();
@@ -20,7 +19,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Login Button Handler
   loginBtn.addEventListener('click', async () => {
     const email = emailInput.value;
     const password = passwordInput.value;
@@ -49,18 +47,16 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Logout Button Handler
   logoutBtn.addEventListener('click', () => {
     chrome.storage.local.remove('jwt', () => {
       showLogin();
     });
   });
 
-  // Open Web App Button Handler
   openWebAppBtn.addEventListener('click', () => {
     chrome.runtime.sendMessage({ action: 'openWebApp' });
   });
-  // Show Login Function
+
   function showLogin() {
     loginContainer.style.display = 'block';
     statsContainer.style.display = 'none';
@@ -68,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
     passwordInput.value = '';
     loginError.textContent = '';
   }
-  // Show Stats Function
+
   function showStats() {
     loginContainer.style.display = 'none';
     statsContainer.style.display = 'block';
