@@ -1,9 +1,9 @@
-
 import express from 'express';
 import { logger } from '../index.js';
 import ScreenTime from '../models/screenTime.js';
 import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
+import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -13,9 +13,6 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // Log the userId for debugging
-    logger.info('Fetching data for user', { userId });
-
     // Fetch latest ScreenTime data
     const latestScreenTime = await ScreenTime.findOne({ userId })
       .sort({ date: -1 })
@@ -26,17 +23,13 @@ router.post('/', authMiddleware, async (req, res) => {
       .sort({ timestamp: -1 })
       .limit(1);
 
-    // Log the fetched data
-    logger.info('Fetched ScreenTime and Mood', {
-      screenTime: latestScreenTime,
-      mood: latestMood,
-    });
-
     // Default recommendation
     let recommendation = {
       type: 'message',
       details: { message: 'Keep up the good work!' },
-      trigger: 'default',
+      trigger: { message: 'No specific conditions met' },
+      triggerSource: 'default',
+      triggerNote: 'Default recommendation',
     };
 
     // Apply recommendation rules
@@ -44,29 +37,31 @@ router.post('/', authMiddleware, async (req, res) => {
       const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
       const mood = latestMood.mood;
 
-      logger.info('Applying rules', { totalTime, mood }); // Ensure mood is logged
-
       if (totalTime > 300 && mood === 'stressed') {
         recommendation = {
           type: 'break',
           details: { action: 'walk', duration: '5m' },
-          trigger: 'screenTime and mood',
+          trigger: { screenTime: '>5h', mood: 'stressed' },
+          triggerSource: 'mood',
+          triggerNote: 'Triggered by high screen time and stress',
         };
       } else if (totalTime > 180 && mood === 'tired') {
         recommendation = {
           type: 'break',
           details: { action: 'rest', duration: '10m' },
-          trigger: 'screenTime and mood',
+          trigger: { screenTime: '>3h', mood: 'tired' },
+          triggerSource: 'mood',
+          triggerNote: 'Triggered by moderate screen time and tiredness',
         };
       } else if (mood === 'happy') {
         recommendation = {
           type: 'message',
           details: { message: 'You’re doing great!' },
-          trigger: 'mood',
+          trigger: { mood: 'happy' },
+          triggerSource: 'mood',
+          triggerNote: 'Triggered by positive mood',
         };
       }
-    } else {
-      logger.warn('No ScreenTime or Mood data found', { userId });
     }
 
     // Save recommendation to database
@@ -78,12 +73,24 @@ router.post('/', authMiddleware, async (req, res) => {
       details: recommendation.type === 'message'
         ? recommendation.details.message
         : `Take a ${recommendation.details.duration} ${recommendation.details.action}`,
-      trigger: recommendation.trigger,
+      trigger: JSON.stringify(recommendation.trigger),
       accepted: false,
     });
 
     await newRecommendation.save();
-    logger.info('Recommendation generated and saved', { userId, recommendation });
+    logger.info('Recommendation saved', { userId, recommendation });
+
+    // Create TriggerLink
+    const newTriggerLink = new TriggerLink({
+      triggerLinkId: `tl_${Date.now()}`,
+      fromSource: recommendation.triggerSource,
+      recommendationId: newRecommendation.recommendationId,
+      timestamp: new Date(),
+      note: recommendation.triggerNote,
+    });
+
+    await newTriggerLink.save();
+    logger.info('TriggerLink created', { userId, triggerLink: newTriggerLink });
 
     // Return recommendation
     res.status(200).json({
