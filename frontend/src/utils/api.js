@@ -44,11 +44,26 @@ export const getScreenTime = async () => {
   return response.data;
 };
 
-export const sendMood = async (moodData) => {
+export const saveMood = async (moodData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.post('/test-mood', moodData, {
-    headers: { Authorization: `Bearer ${token}` },
+
+  const response = await api.post('/mood', moodData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data;
+};
+
+export const getRecommendations = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+
+  const response = await api.get('/recommendations', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
   return response.data;
 };

@@ -1,3 +1,4 @@
+
 import express from 'express';
 import { logger } from '../index.js';
 import ScreenTime from '../models/screenTime.js';
@@ -23,6 +24,10 @@ router.post('/', authMiddleware, async (req, res) => {
       .sort({ timestamp: -1 })
       .limit(1);
 
+    // Debug logs
+    logger.info('Fetched ScreenTime for user:', { userId, latestScreenTime });
+    logger.info('Fetched Mood for user:', { userId, latestMood });
+
     // Default recommendation
     let recommendation = {
       type: 'message',
@@ -36,6 +41,8 @@ router.post('/', authMiddleware, async (req, res) => {
     if (latestScreenTime && latestMood) {
       const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
       const mood = latestMood.mood;
+
+      logger.info('Applying rules:', { totalTime, mood });
 
       if (totalTime > 300 && mood === 'stressed') {
         recommendation = {
@@ -99,6 +106,23 @@ router.post('/', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     logger.error('Error generating recommendation:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /recommendations
+router.get('/', authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    const recommendations = await Recommendation.find({ userId })
+      .sort({ timestamp: -1 })
+      .limit(5);
+
+    logger.info('Recommendations fetched', { userId, count: recommendations.length });
+    res.status(200).json(recommendations);
+  } catch (error) {
+    logger.error('Error fetching recommendations:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

@@ -1,32 +1,32 @@
 /*global chrome*/
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, sendMood } from '../utils/api';
+import { getScreenTime, saveMood, getRecommendations } from '../utils/api';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
-const MODEL_URL = '/models'; // Local models
-const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/'; // CDN fallback
-
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
+  const [recommendations, setRecommendations] = useState([]);
   const [error, setError] = useState('');
   const [extensionInstalled, setExtensionInstalled] = useState(true);
   const [webcamEnabled, setWebcamEnabled] = useState(false);
-  const [detectedMood, setDetectedMood] = useState('Detecting mood...');
-  const [detectionAttempts, setDetectionAttempts] = useState(0);
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [correctedMood, setCorrectedMood] = useState('');
+  const [detectedMood, setDetectedMood] = useState('');
   const [lastSavedMood, setLastSavedMood] = useState(null);
+  const [correctedMood, setCorrectedMood] = useState('');
+  const [timer, setTimer] = useState(null);
+  const [timerRunning, setTimerRunning] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const detectionIntervalRef = useRef(null);
   const lastSentRef = useRef(0);
+  const timerRef = useRef(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    // Fetch screen time data
+    const fetchScreenTime = async () => {
       try {
         const data = await getScreenTime();
         setScreenTimeData(data);
@@ -35,8 +35,20 @@ const Dashboard = () => {
       }
     };
 
-    fetchData();
+    // Fetch recommendations
+    const fetchRecommendations = async () => {
+      try {
+        const data = await getRecommendations();
+        setRecommendations(data);
+      } catch (err) {
+        setError(err.message || 'Failed to fetch recommendations');
+      }
+    };
 
+    fetchScreenTime();
+    fetchRecommendations();
+
+    // Check if extension is installed
     if (window.chrome && chrome.runtime) {
       chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
         if (chrome.runtime.lastError || !response) {
@@ -47,75 +59,44 @@ const Dashboard = () => {
       setExtensionInstalled(false);
     }
 
+    // Load Face-API.js models
     const loadModels = async () => {
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        console.log('TinyFaceDetector loaded');
-        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-        console.log('FaceLandmark68Net loaded');
-        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
-        console.log('FaceExpressionNet loaded');
-        setModelsLoaded(true);
+        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
+        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+        await faceapi.nets.faceExpressionNet.loadFromUri('/models');
+        console.log('Face-API.js models loaded');
       } catch (err) {
-        console.warn('Failed to load local models:', err);
-        try {
-          await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
-          await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
-          await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
-          console.log('Face-API.js models loaded from CDN');
-          setModelsLoaded(true);
-        } catch (cdnErr) {
-          console.error('Error loading models from CDN:', cdnErr);
-          setError('Failed to load emotion detection models.');
-        }
+        console.error('Error loading models:', err);
+        setError('Failed to load emotion detection models');
       }
     };
 
     loadModels();
 
+    // Cleanup on unmount
     return () => {
-      stopWebcam();
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     };
   }, []);
 
   const startWebcam = async () => {
-    if (!modelsLoaded) {
-      setError('Models are still loading, please wait...');
-      return;
-    }
-
-    if (!videoRef.current) {
-      console.error('Video element not found in DOM');
-      setError('Video element not found. Please refresh the page.');
-      return;
-    }
-
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       streamRef.current = stream;
-      console.log('Webcam stream obtained:', stream);
       videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => {
-        console.log('Video metadata loaded');
-        videoRef.current.play().then(() => {
-          console.log('Video playback started');
-          setWebcamEnabled(true);
-        }).catch(err => {
-          console.error('Error playing video:', err);
-          setError('Failed to play webcam video.');
-          stopWebcam();
-        });
-      };
+      setWebcamEnabled(true);
+
+      // Start emotion detection
+      videoRef.current.addEventListener('play', detectEmotions);
     } catch (err) {
       console.error('Error accessing webcam:', err);
-      if (err.name === 'NotAllowedError') {
-        setError('Webcam access denied. Please grant camera permission in browser settings.');
-      } else if (err.name === 'NotFoundError') {
-        setError('No webcam found. Please connect a webcam and try again.');
-      } else {
-        setError('Failed to access webcam: ' + err.message);
-      }
-      setWebcamEnabled(false);
+      setError('Failed to access webcam. Please grant permission.');
     }
   };
 
@@ -123,39 +104,83 @@ const Dashboard = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
-      console.log('Webcam stream stopped');
-    }
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
     }
     setWebcamEnabled(false);
-    setDetectedMood('Detecting mood...');
-    setDetectionAttempts(0);
+    setDetectedMood('');
     setCorrectedMood('');
     setLastSavedMood(null);
+  };
+
+  const detectEmotions = async () => {
+    if (!videoRef.current) return;
+
+    const detection = await faceapi
+      .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
+      .withFaceLandmarks()
+      .withFaceExpressions();
+
+    if (detection && detection.expressions) {
+      const expressions = detection.expressions;
+      const emotions = Object.keys(expressions).map(key => ({
+        mood: key,
+        confidence: expressions[key],
+      }));
+      const dominantEmotion = emotions.reduce((prev, current) =>
+        prev.confidence > current.confidence ? prev : current
+      );
+
+      const moodText = correctedMood || dominantEmotion.mood;
+      setDetectedMood(
+        `You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`
+      );
+
+      // Send mood to backend every 10 seconds
+      const now = Date.now();
+      const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
+      if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
+        try {
+          await saveMood(moodToSend);
+          console.log('Mood sent:', moodToSend);
+          setLastSavedMood(moodToSend);
+          lastSentRef.current = now;
+
+          // Simulate TriggerLink
+          const triggerLink = {
+            fromSource: 'mood',
+            data: { mood: moodToSend.mood, confidence: moodToSend.confidence },
+          };
+          console.log('TriggerLink:', triggerLink);
+        } catch (err) {
+          console.error('Error saving mood:', err);
+          setError('Failed to save mood');
+        }
+      }
+    } else {
+      setDetectedMood('No face detected');
+    }
+
+    // Continue detection every 100ms
+    if (webcamEnabled) {
+      setTimeout(detectEmotions, 100);
+    }
   };
 
   const handleMoodCorrection = async (e) => {
     const newMood = e.target.value;
     setCorrectedMood(newMood);
 
-    if (!newMood) {
-      console.log('No mood selected, skipping send.');
-      return;
-    }
-
+    // Send corrected mood to backend immediately
     try {
-      const moodToSend = { mood: newMood, confidence: 1.0 };
-      console.log('Sending corrected mood:', moodToSend);
-      await sendMood(moodToSend);
+      const moodToSend = { mood: newMood, confidence: 1.0 }; // Confidence 1.0 for user-corrected moods
+      await saveMood(moodToSend);
       console.log('Corrected mood sent:', moodToSend);
       setLastSavedMood(moodToSend);
       lastSentRef.current = Date.now();
 
+      // Simulate TriggerLink
       const triggerLink = {
         fromSource: 'mood',
-        data: { mood: newMood, confidence: 1.0, timestamp: new Date().toISOString() },
+        data: { mood: newMood, confidence: 1.0 },
       };
       console.log('TriggerLink:', triggerLink);
 
@@ -166,96 +191,39 @@ const Dashboard = () => {
     }
   };
 
-  useEffect(() => {
-    if (webcamEnabled && videoRef.current) {
-      console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(async () => {
-        try {
-          const detection = await faceapi
-            .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
-            .withFaceLandmarks()
-            .withFaceExpressions();
+  // Timer logic for break-type recommendations
+  const startTimer = (duration) => {
+    const minutes = parseInt(duration); // e.g., "5m" -> 5
+    setTimer(minutes * 60); // Convert to seconds
+    setTimerRunning(true);
 
-          setDetectionAttempts(prev => prev + 1);
-
-          if (detection && detection.expressions) {
-            const expressions = detection.expressions;
-            console.log('Detected expressions:', expressions);
-            const moodMap = {
-              happy: expressions.happy || 0,
-              sad: expressions.sad || 0,
-              angry: expressions.angry || 0,
-              stressed: expressions.fearful || 0,
-              calm: expressions.neutral || 0,
-              neutral: expressions.neutral || 0,
-              surprised: expressions.surprised || 0,
-              disgusted: expressions.disgusted || 0
-            };
-            const emotions = Object.keys(moodMap).map(key => ({
-              mood: key === 'surprised' ? 'happy' : key === 'disgusted' ? 'angry' : key,
-              confidence: moodMap[key]
-            }));
-            const dominantEmotion = emotions.reduce((prev, current) =>
-              prev.confidence > current.confidence ? prev : current
-            );
-
-            const moodText = correctedMood || dominantEmotion.mood;
-            setDetectedMood(`You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`);
-
-            const now = Date.now();
-            const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
-
-            console.log('Checking if mood should be sent...');
-            console.log('Time since last send (ms):', now - lastSentRef.current);
-            console.log('Last saved mood:', lastSavedMood);
-            console.log('Current mood to send:', moodToSend);
-
-            if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
-              try {
-                console.log('Sending mood:', moodToSend);
-                await sendMood(moodToSend);
-                console.log('Mood sent:', moodToSend);
-                setLastSavedMood(moodToSend);
-                lastSentRef.current = now;
-
-                const triggerLink = {
-                  fromSource: 'mood',
-                  data: { mood: moodToSend.mood, confidence: moodToSend.confidence, timestamp: new Date().toISOString() },
-                };
-                console.log('TriggerLink:', triggerLink);
-              } catch (err) {
-                console.error('Error sending mood:', err);
-                setError('Failed to send mood data.');
-                lastSentRef.current = now;
-              }
-            } else {
-              console.log('Mood not sent: time threshold not met or mood unchanged');
-            }
-
-            setDetectionAttempts(0);
-          } else {
-            console.log('No face detected');
-            setDetectedMood('No face detected. Please center your face in the frame.');
-
-            if (detectionAttempts >= 10) {
-              setDetectedMood('Still no face detected. Ensure good lighting and face the camera directly.');
-            }
-          }
-        } catch (err) {
-          console.error('Error during emotion detection:', err);
-          setDetectedMood('Error detecting emotions');
+    timerRef.current = setInterval(() => {
+      setTimer((prev) => {
+        if (prev <= 0) {
+          clearInterval(timerRef.current);
+          setTimerRunning(false);
+          return 0;
         }
-      }, 500);
+        return prev - 1;
+      });
+    }, 1000);
+  };
 
-      return () => {
-        if (detectionIntervalRef.current) {
-          clearInterval(detectionIntervalRef.current);
-          console.log('Emotion detection stopped');
-        }
-      };
+  const resetTimer = () => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
     }
-  }, [webcamEnabled, detectionAttempts, correctedMood]);
+    setTimer(null);
+    setTimerRunning(false);
+  };
 
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
+  // Prepare data for charts (same as before)
   const barChartData = {
     labels: screenTimeData.map((entry) => new Date(entry.date).toLocaleDateString()),
     datasets: [
@@ -315,6 +283,9 @@ const Dashboard = () => {
     window.open('https://chrome.google.com/webstore', '_blank');
   };
 
+  // Get the latest recommendation
+  const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
+
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <h1 className="text-4xl font-bold text-center mb-8">ChillBoard Dashboard</h1>
@@ -339,42 +310,67 @@ const Dashboard = () => {
           className={`px-4 py-2 rounded transition ${
             webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'
           } text-white`}
-          disabled={!modelsLoaded}
         >
           {webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}
         </button>
       </div>
 
-      <div className="mb-8 flex justify-center">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'}`}
-        />
-      </div>
-
       {webcamEnabled && (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md">
-          <p className="text-xl font-semibold text-gray-800">{detectedMood}</p>
-          {detectedMood && !detectedMood.includes('No face') && !detectedMood.includes('Error') && (
-            <div className="mt-4">
-              <label className="text-gray-600">Not correct? Select another mood: </label>
-              <select
-                value={correctedMood}
-                onChange={handleMoodCorrection}
-                className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select mood</option>
-                <option value="happy">Happy</option>
-                <option value="sad">Sad</option>
-                <option value="angry">Angry</option>
-                <option value="stressed">Stressed</option>
-                <option value="calm">Calm</option>
-                <option value="neutral">Neutral</option>
-              </select>
-            </div>
-          )}
+        <div className="mb-8 flex justify-center">
+          <video ref={videoRef} autoPlay muted className="rounded-lg shadow-md w-64 h-48" />
+        </div>
+      )}
+
+      {detectedMood && (
+        <div className="mb-8 text-center">
+          <p className="text-xl font-semibold">{detectedMood}</p>
+          <div className="mt-4">
+            <label className="text-gray-600">Not correct? Select another mood: </label>
+            <select
+              value={correctedMood}
+              onChange={handleMoodCorrection}
+              className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">Select mood</option>
+              <option value="happy">Happy</option>
+              <option value="sad">Sad</option>
+              <option value="angry">Angry</option>
+              <option value="stressed">Stressed</option>
+              <option value="calm">Calm</option>
+              <option value="neutral">Neutral</option>
+            </select>
+          </div>
+        </div>
+      )}
+
+      {latestRecommendation && (
+        <div className="mb-8">
+          <h2 className="text-2xl font-semibold text-center mb-4">Recommendation</h2>
+          <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
+            <p className="text-lg font-medium">{latestRecommendation.details}</p>
+            {latestRecommendation.type === 'break' && (
+              <div className="mt-4">
+                {timer !== null ? (
+                  <div>
+                    <p className="text-xl font-semibold">{formatTime(timer)}</p>
+                    <button
+                      onClick={resetTimer}
+                      className="mt-2 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition"
+                    >
+                      Reset Timer
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])}
+                    className="mt-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
+                  >
+                    Start Timer
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
 
