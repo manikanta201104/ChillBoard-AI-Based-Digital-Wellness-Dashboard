@@ -4,7 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, saveMood, getRecommendations } from '../utils/api';
+import { getScreenTime, saveMood, getRecommendations, updateRecommendation } from '../utils/api';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
@@ -19,34 +19,27 @@ const Dashboard = () => {
   const [correctedMood, setCorrectedMood] = useState('');
   const [timer, setTimer] = useState(null);
   const [timerRunning, setTimerRunning] = useState(false);
+  const [actionStatus, setActionStatus] = useState(null); // Track accept/decline status
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef(0);
   const timerRef = useRef(null);
 
+  // Fetch data periodically to keep recommendations fresh
   useEffect(() => {
-    // Fetch screen time data
-    const fetchScreenTime = async () => {
+    const fetchData = async () => {
       try {
-        const data = await getScreenTime();
-        setScreenTimeData(data);
+        const [screenTime, recs] = await Promise.all([getScreenTime(), getRecommendations()]);
+        setScreenTimeData(screenTime);
+        setRecommendations(recs);
+        setError(''); // Clear any previous errors
       } catch (err) {
-        setError(err.message || 'Failed to fetch screen time data');
+        setError(err.message || 'Failed to fetch data');
       }
     };
 
-    // Fetch recommendations
-    const fetchRecommendations = async () => {
-      try {
-        const data = await getRecommendations();
-        setRecommendations(data);
-      } catch (err) {
-        setError(err.message || 'Failed to fetch recommendations');
-      }
-    };
-
-    fetchScreenTime();
-    fetchRecommendations();
+    fetchData();
+    const interval = setInterval(fetchData, 30000); // Refresh every 30 seconds
 
     // Check if extension is installed
     if (window.chrome && chrome.runtime) {
@@ -62,9 +55,11 @@ const Dashboard = () => {
     // Load Face-API.js models
     const loadModels = async () => {
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-        await faceapi.nets.faceExpressionNet.loadFromUri('/models');
+        await Promise.all([
+          faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+          faceapi.nets.faceExpressionNet.loadFromUri('/models'),
+        ]);
         console.log('Face-API.js models loaded');
       } catch (err) {
         console.error('Error loading models:', err);
@@ -82,6 +77,7 @@ const Dashboard = () => {
       if (timerRef.current) {
         clearInterval(timerRef.current);
       }
+      clearInterval(interval);
     };
   }, []);
 
@@ -91,8 +87,6 @@ const Dashboard = () => {
       streamRef.current = stream;
       videoRef.current.srcObject = stream;
       setWebcamEnabled(true);
-
-      // Start emotion detection
       videoRef.current.addEventListener('play', detectEmotions);
     } catch (err) {
       console.error('Error accessing webcam:', err);
@@ -112,7 +106,7 @@ const Dashboard = () => {
   };
 
   const detectEmotions = async () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current || !webcamEnabled) return;
 
     const detection = await faceapi
       .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
@@ -134,22 +128,13 @@ const Dashboard = () => {
         `You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`
       );
 
-      // Send mood to backend every 10 seconds
       const now = Date.now();
       const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
       if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
         try {
           await saveMood(moodToSend);
-          console.log('Mood sent:', moodToSend);
           setLastSavedMood(moodToSend);
           lastSentRef.current = now;
-
-          // Simulate TriggerLink
-          const triggerLink = {
-            fromSource: 'mood',
-            data: { mood: moodToSend.mood, confidence: moodToSend.confidence },
-          };
-          console.log('TriggerLink:', triggerLink);
         } catch (err) {
           console.error('Error saving mood:', err);
           setError('Failed to save mood');
@@ -159,7 +144,6 @@ const Dashboard = () => {
       setDetectedMood('No face detected');
     }
 
-    // Continue detection every 100ms
     if (webcamEnabled) {
       setTimeout(detectEmotions, 100);
     }
@@ -169,21 +153,11 @@ const Dashboard = () => {
     const newMood = e.target.value;
     setCorrectedMood(newMood);
 
-    // Send corrected mood to backend immediately
     try {
-      const moodToSend = { mood: newMood, confidence: 1.0 }; // Confidence 1.0 for user-corrected moods
+      const moodToSend = { mood: newMood, confidence: 1.0 };
       await saveMood(moodToSend);
-      console.log('Corrected mood sent:', moodToSend);
       setLastSavedMood(moodToSend);
       lastSentRef.current = Date.now();
-
-      // Simulate TriggerLink
-      const triggerLink = {
-        fromSource: 'mood',
-        data: { mood: newMood, confidence: 1.0 },
-      };
-      console.log('TriggerLink:', triggerLink);
-
       setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
     } catch (err) {
       console.error('Error saving corrected mood:', err);
@@ -191,10 +165,9 @@ const Dashboard = () => {
     }
   };
 
-  // Timer logic for break-type recommendations
   const startTimer = (duration) => {
-    const minutes = parseInt(duration); // e.g., "5m" -> 5
-    setTimer(minutes * 60); // Convert to seconds
+    const minutes = parseInt(duration);
+    setTimer(minutes * 60);
     setTimerRunning(true);
 
     timerRef.current = setInterval(() => {
@@ -223,7 +196,48 @@ const Dashboard = () => {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // Prepare data for charts (same as before)
+  const handleRecommendationAction = async (recommendationId, accepted) => {
+    try {
+      setActionStatus(null); // Reset action status
+      // Verify recommendation exists
+      const currentRecommendations = await getRecommendations();
+      const recommendation = currentRecommendations.find(
+        (rec) => rec.recommendationId === recommendationId
+      );
+
+      if (!recommendation) {
+        setError('Recommendation no longer available. Refreshing data...');
+        setRecommendations(currentRecommendations);
+        return;
+      }
+
+      // Optimistically update the UI
+      setRecommendations((prev) =>
+        prev.map((rec) =>
+          rec.recommendationId === recommendationId ? { ...rec, accepted } : rec
+        )
+      );
+
+      // Send PATCH request
+      await updateRecommendation(recommendationId, accepted);
+      setActionStatus(accepted ? 'accepted' : 'declined');
+
+      // Fetch latest recommendations to ensure sync
+      const updatedRecommendations = await getRecommendations();
+      setRecommendations(updatedRecommendations);
+    } catch (err) {
+      console.error('Error updating recommendation:', err.response?.data || err.message);
+      setError(
+        err.response?.status === 404
+          ? 'Recommendation not found. It may have been deleted.'
+          : `Failed to update recommendation: ${err.response?.data?.message || err.message}`
+      );
+      // Refresh recommendations on error to ensure UI is in sync
+      const updatedRecommendations = await getRecommendations();
+      setRecommendations(updatedRecommendations);
+    }
+  };
+
   const barChartData = {
     labels: screenTimeData.map((entry) => new Date(entry.date).toLocaleDateString()),
     datasets: [
@@ -283,7 +297,6 @@ const Dashboard = () => {
     window.open('https://chrome.google.com/webstore', '_blank');
   };
 
-  // Get the latest recommendation
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
 
   return (
@@ -348,7 +361,32 @@ const Dashboard = () => {
           <h2 className="text-2xl font-semibold text-center mb-4">Recommendation</h2>
           <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
             <p className="text-lg font-medium">{latestRecommendation.details}</p>
-            {latestRecommendation.type === 'break' && (
+            <div className="mt-4 flex space-x-4">
+              <button
+                onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)}
+                disabled={actionStatus !== null}
+                className={`px-4 py-2 rounded transition ${
+                  actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'
+                }`}
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)}
+                disabled={actionStatus !== null}
+                className={`px-4 py-2 rounded transition ${
+                  actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'
+                }`}
+              >
+                Decline
+              </button>
+            </div>
+            {actionStatus && (
+              <p className="mt-2 text-sm text-gray-600">
+                Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!
+              </p>
+            )}
+            {latestRecommendation.type === 'break' && !actionStatus && (
               <div className="mt-4">
                 {timer !== null ? (
                   <div>

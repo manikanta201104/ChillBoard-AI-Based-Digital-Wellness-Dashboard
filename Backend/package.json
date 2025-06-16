@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-modules index.js",
-    "dev": "nodemon --exec node --experimental-modules index.js",
+    "dev": "nodemon index.js",
     "build": "echo \"Building the backend...\"",
     "lint": "eslint .",
     "format": "prettier --write .",

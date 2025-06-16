@@ -1,70 +1,42 @@
 import express from 'express';
-import cors from 'cors';
-import 'express-async-errors';
-import winston from 'winston';
-import healthRouter from './routes/health.js';
-import connectDB from './db/index.js';
-import {config} from './config/env.js';
 import mongoose from 'mongoose';
-import testRouter from './routes/test.js';
-import authRouter from './routes/auth.js';
-import screenTimeRouter from './routes/screenTime.js';
-import testMoodRouter from './routes/testMood.js';
-import moodRouter from './routes/mood.js';
-import recommendationRouter from './routes/recommendations.js';
+import cors from 'cors';
+import logger from './logger.js';
 
-const logger = winston.createLogger ({
-  level: 'info',
-  format: winston.format.combine (
-    winston.format.timestamp (),
-    winston.format.json ()
-  ),
-  transports: [
-    new winston.transports.Console (),
-    new winston.transports.File ({filename: 'logs/error.log', level: 'error'}),
-    new winston.transports.File ({filename: 'logs/combined.log'}),
-  ],
+mongoose
+  .connect(process.env.MONGO_URI, {
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
+  })
+  .then(() => logger.info('Connected to MongoDB'))
+  .catch((err) => logger.error('MongoDB connection error:', err));
+
+import authRoutes from './routes/auth.js';
+import screenTimeRoutes from './routes/screenTime.js';
+import moodRoutes from './routes/mood.js';
+import recommendationsRoutes from './routes/recommendations.js';
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get('/test', (req, res) => {
+  logger.info('Received GET request at /test');
+  res.status(200).json({ message: 'Server is running' });
 });
 
-export {logger};
-
-const app = express ();
-
-app.use (cors ({origin: 'http://localhost:3000'}));
-app.use (express.json ());
-
-app.use ('/health', healthRouter);
-app.use ('/test-user', testRouter);
-app.use ('/auth', authRouter);
-app.use ('/screen-time', screenTimeRouter);
-app.use ('/test-mood', testMoodRouter);
-app.use ('/mood', moodRouter);
-app.use ('/recommendations', recommendationRouter);
-app.get ('/ping', (req, res) => {
-  res.status (200).json ({status: 'Server is running'});
+// Simplify the PATCH route for testing
+app.patch('/test-patch', (req, res) => {
+  res.status(200).json({ message: 'PATCH request received' });
 });
 
-app.use ((err, req, res, next) => {
-  logger.error (err.stack);
-  res.status (500).send ('Something went wrong');
+app.use('/auth', authRoutes);
+app.use('/screen-time', screenTimeRoutes);
+app.use('/mood', moodRoutes);
+app.use('/recommendations', recommendationsRoutes);
+
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  logger.info(`Server running on port ${PORT}`);
 });
-
-const startServer = async () => {
-  try {
-    await connectDB ();
-    app.listen (config.port, () => {
-      logger.info (`Server running on port ${config.port}`);
-    });
-  } catch (error) {
-    logger.error ('Failed to start server:', error);
-    process.exit (1);
-  }
-};
-
-process.on ('SIGTERM', async () => {
-  logger.info ('SIGTERM received. Closing server...');
-  await mongoose.connection.close ();
-  process.exit (1);
-});
-
-startServer ();

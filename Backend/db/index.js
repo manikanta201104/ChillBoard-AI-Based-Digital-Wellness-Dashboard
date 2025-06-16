@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { logger } from '../index.js'; // FIXED: Winston logger must come from correct import
+import logger  from '../logger.js'; // FIXED: Winston logger must come from correct import
 import { config } from '../config/env.js';
 
 const connectDB = async () => {

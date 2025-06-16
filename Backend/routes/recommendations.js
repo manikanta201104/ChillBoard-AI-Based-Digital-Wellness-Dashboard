@@ -1,11 +1,16 @@
-
 import express from 'express';
-import { logger } from '../index.js';
+import logger from '../logger.js'; // Import logger from the new file
 import ScreenTime from '../models/screenTime.js';
 import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
 import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
+
+// Log only inside a function to avoid initialization issues
+const logInitialization = () => {
+  logger.info('Loading recommendations.js routes');
+};
+logInitialization();
 
 const router = express.Router();
 
@@ -14,21 +19,14 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // Fetch latest ScreenTime data
     const latestScreenTime = await ScreenTime.findOne({ userId })
       .sort({ date: -1 })
       .limit(1);
 
-    // Fetch latest Mood data
     const latestMood = await Mood.findOne({ userId })
       .sort({ timestamp: -1 })
       .limit(1);
 
-    // Debug logs
-    logger.info('Fetched ScreenTime for user:', { userId, latestScreenTime });
-    logger.info('Fetched Mood for user:', { userId, latestMood });
-
-    // Default recommendation
     let recommendation = {
       type: 'message',
       details: { message: 'Keep up the good work!' },
@@ -37,12 +35,9 @@ router.post('/', authMiddleware, async (req, res) => {
       triggerNote: 'Default recommendation',
     };
 
-    // Apply recommendation rules
     if (latestScreenTime && latestMood) {
-      const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
+      const totalTime = latestScreenTime.totalTime / 60;
       const mood = latestMood.mood;
-
-      logger.info('Applying rules:', { totalTime, mood });
 
       if (totalTime > 300 && mood === 'stressed') {
         recommendation = {
@@ -71,7 +66,6 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
 
-    // Save recommendation to database
     const newRecommendation = new Recommendation({
       recommendationId: `rec_${Date.now()}`,
       userId,
@@ -87,7 +81,6 @@ router.post('/', authMiddleware, async (req, res) => {
     await newRecommendation.save();
     logger.info('Recommendation saved', { userId, recommendation });
 
-    // Create TriggerLink
     const newTriggerLink = new TriggerLink({
       triggerLinkId: `tl_${Date.now()}`,
       fromSource: recommendation.triggerSource,
@@ -99,7 +92,6 @@ router.post('/', authMiddleware, async (req, res) => {
     await newTriggerLink.save();
     logger.info('TriggerLink created', { userId, triggerLink: newTriggerLink });
 
-    // Return recommendation
     res.status(200).json({
       type: recommendation.type,
       details: recommendation.details,
@@ -123,6 +115,39 @@ router.get('/', authMiddleware, async (req, res) => {
     res.status(200).json(recommendations);
   } catch (error) {
     logger.error('Error fetching recommendations:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// PATCH /recommendations/:id
+router.patch('/:id', authMiddleware, async (req, res) => {
+  logger.info(`Received PATCH request for /recommendations/${req.params.id}`);
+  const userId = req.user.userId;
+  const recommendationId = req.params.id;
+  const { accepted } = req.body;
+
+  try {
+    if (typeof accepted !== 'boolean') {
+      logger.warn('Invalid request: Accepted field must be a boolean');
+      return res.status(400).json({ message: 'Accepted field must be a boolean' });
+    }
+
+    logger.info(`Querying recommendation: recommendationId=${recommendationId}, userId=${userId}`);
+    const updatedRecommendation = await Recommendation.findOneAndUpdate(
+      { recommendationId, userId },
+      { accepted },
+      { new: true }
+    );
+
+    if (!updatedRecommendation) {
+      logger.warn(`Recommendation not found: recommendationId=${recommendationId}, userId=${userId}`);
+      return res.status(404).json({ message: 'Recommendation not found or not authorized' });
+    }
+
+    logger.info('Recommendation updated', { userId, recommendationId, accepted });
+    res.status(200).json(updatedRecommendation);
+  } catch (error) {
+    logger.error('Error updating recommendation:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

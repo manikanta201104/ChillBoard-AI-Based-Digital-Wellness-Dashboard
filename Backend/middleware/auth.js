@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { logger } from '../index.js';
+import  logger  from '../logger.js';
 import { config } from '../config/env.js';
 
 export const authMiddleware = (req, res, next) => {
