@@ -2,16 +2,6 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import winston from 'winston';
-
-
-mongoose
-  .connect(process.env.MONGO_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  })
-  .then(() => logger.info('Connected to MongoDB'))
-  .catch((err) => logger.error('MongoDB connection error:', err));
-
 import authRoutes from './routes/auth.js';
 import screenTimeRoutes from './routes/screenTime.js';
 import moodRoutes from './routes/mood.js';
@@ -36,7 +26,18 @@ export { logger };
 
 const app = express();
 
-app.use(cors());
+// Configure CORS to allow Chrome extension origin
+app.use(cors({
+  origin: [
+    'http://localhost:3000', // React frontend
+    'chrome-extension://<your-extension-id>', // Replace with your extension ID
+    // For testing, you can temporarily use '*' to allow all origins
+    '*'
+  ],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+
 app.use(express.json());
 
 app.get('/test', (req, res) => {
@@ -44,7 +45,6 @@ app.get('/test', (req, res) => {
   res.status(200).json({ message: 'Server is running' });
 });
 
-// Simplify the PATCH route for testing
 app.patch('/test-patch', (req, res) => {
   res.status(200).json({ message: 'PATCH request received' });
 });
@@ -53,6 +53,16 @@ app.use('/auth', authRoutes);
 app.use('/screen-time', screenTimeRoutes);
 app.use('/mood', moodRoutes);
 app.use('/recommendations', recommendationsRoutes);
+app.use('/ping', (req, res) => {
+  logger.info('Received GET request at /ping');
+  res.status(200).json({ message: 'Pong' });
+});
+
+// Remove deprecated options
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => logger.info('Connected to MongoDB'))
+  .catch((err) => logger.error('MongoDB connection error:', err));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
