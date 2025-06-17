@@ -1,5 +1,5 @@
 import express from 'express';
-import  logger  from '../logger.js';
+import  {logger}  from '../index.js';
 import Mood from '../models/mood.js';
 import { authMiddleware } from '../middleware/auth.js';
 

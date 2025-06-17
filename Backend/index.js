@@ -1,7 +1,8 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
-import logger from './logger.js';
+import winston from 'winston';
+
 
 mongoose
   .connect(process.env.MONGO_URI, {
@@ -15,6 +16,23 @@ import authRoutes from './routes/auth.js';
 import screenTimeRoutes from './routes/screenTime.js';
 import moodRoutes from './routes/mood.js';
 import recommendationsRoutes from './routes/recommendations.js';
+
+// Logger setup
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
+    new winston.transports.File({ filename: 'logs/combined.log' }),
+  ],
+});
+
+// Export logger for use in other files
+export { logger };
 
 const app = express();
 

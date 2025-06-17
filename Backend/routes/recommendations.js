@@ -1,16 +1,11 @@
+
 import express from 'express';
-import logger from '../logger.js'; // Import logger from the new file
+import { logger } from '../index.js';
 import ScreenTime from '../models/screenTime.js';
 import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
 import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
-
-// Log only inside a function to avoid initialization issues
-const logInitialization = () => {
-  logger.info('Loading recommendations.js routes');
-};
-logInitialization();
 
 const router = express.Router();
 
@@ -19,14 +14,17 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
+    // Fetch latest ScreenTime data
     const latestScreenTime = await ScreenTime.findOne({ userId })
       .sort({ date: -1 })
       .limit(1);
 
+    // Fetch latest Mood data
     const latestMood = await Mood.findOne({ userId })
       .sort({ timestamp: -1 })
       .limit(1);
 
+    // Default recommendation
     let recommendation = {
       type: 'message',
       details: { message: 'Keep up the good work!' },
@@ -35,8 +33,9 @@ router.post('/', authMiddleware, async (req, res) => {
       triggerNote: 'Default recommendation',
     };
 
+    // Apply recommendation rules
     if (latestScreenTime && latestMood) {
-      const totalTime = latestScreenTime.totalTime / 60;
+      const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
       const mood = latestMood.mood;
 
       if (totalTime > 300 && mood === 'stressed') {
@@ -66,6 +65,7 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
 
+    // Save recommendation to database
     const newRecommendation = new Recommendation({
       recommendationId: `rec_${Date.now()}`,
       userId,
@@ -81,6 +81,7 @@ router.post('/', authMiddleware, async (req, res) => {
     await newRecommendation.save();
     logger.info('Recommendation saved', { userId, recommendation });
 
+    // Create TriggerLink
     const newTriggerLink = new TriggerLink({
       triggerLinkId: `tl_${Date.now()}`,
       fromSource: recommendation.triggerSource,
@@ -92,6 +93,7 @@ router.post('/', authMiddleware, async (req, res) => {
     await newTriggerLink.save();
     logger.info('TriggerLink created', { userId, triggerLink: newTriggerLink });
 
+    // Return recommendation
     res.status(200).json({
       type: recommendation.type,
       details: recommendation.details,
@@ -121,18 +123,18 @@ router.get('/', authMiddleware, async (req, res) => {
 
 // PATCH /recommendations/:id
 router.patch('/:id', authMiddleware, async (req, res) => {
-  logger.info(`Received PATCH request for /recommendations/${req.params.id}`);
   const userId = req.user.userId;
   const recommendationId = req.params.id;
   const { accepted } = req.body;
 
   try {
+    // Validate request body
     if (typeof accepted !== 'boolean') {
-      logger.warn('Invalid request: Accepted field must be a boolean');
+      logger.warn('Validation failed: Accepted field must be a boolean', { userId, recommendationId });
       return res.status(400).json({ message: 'Accepted field must be a boolean' });
     }
 
-    logger.info(`Querying recommendation: recommendationId=${recommendationId}, userId=${userId}`);
+    // Find and update the recommendation
     const updatedRecommendation = await Recommendation.findOneAndUpdate(
       { recommendationId, userId },
       { accepted },
@@ -140,7 +142,7 @@ router.patch('/:id', authMiddleware, async (req, res) => {
     );
 
     if (!updatedRecommendation) {
-      logger.warn(`Recommendation not found: recommendationId=${recommendationId}, userId=${userId}`);
+      logger.warn('Recommendation not found or not authorized', { userId, recommendationId });
       return res.status(404).json({ message: 'Recommendation not found or not authorized' });
     }
 

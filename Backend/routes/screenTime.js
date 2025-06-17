@@ -2,7 +2,7 @@
 import express from 'express';
 import ScreenTime from '../models/screenTime.js';
 import { authMiddleware } from '../middleware/auth.js';
-import logger  from '../logger.js';
+import {logger}  from '../index.js';
 
 const router = express.Router();
 
