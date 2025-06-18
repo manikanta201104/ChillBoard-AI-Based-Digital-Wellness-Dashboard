@@ -1,14 +1,18 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
+import dotenv from 'dotenv';
 import winston from 'winston';
 import authRoutes from './routes/auth.js';
 import screenTimeRoutes from './routes/screenTime.js';
 import moodRoutes from './routes/mood.js';
 import recommendationsRoutes from './routes/recommendations.js';
+import spotifyRoutes from './routes/spotify.js';
+
+dotenv.config();
 
 // Logger setup
-const logger = winston.createLogger({
+export const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
@@ -21,9 +25,6 @@ const logger = winston.createLogger({
   ],
 });
 
-// Export logger for use in other files
-export { logger };
-
 const app = express();
 
 // Configure CORS to allow Chrome extension origin
@@ -31,7 +32,6 @@ app.use(cors({
   origin: [
     'http://localhost:3000', // React frontend
     'chrome-extension://<your-extension-id>', // Replace with your extension ID
-    // For testing, you can temporarily use '*' to allow all origins
     '*'
   ],
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
@@ -57,8 +57,9 @@ app.use('/ping', (req, res) => {
   logger.info('Received GET request at /ping');
   res.status(200).json({ message: 'Pong' });
 });
+app.use('/spotify', spotifyRoutes);
 
-// Remove deprecated options
+// MongoDB Connection
 mongoose
   .connect(process.env.MONGO_URI)
   .then(() => logger.info('Connected to MongoDB'))
