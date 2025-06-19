@@ -1,4 +1,3 @@
-
 import express from 'express';
 import { logger } from '../index.js';
 import ScreenTime from '../models/screenTime.js';
@@ -6,6 +5,7 @@ import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
 import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
+import Playlist from '../models/playlist.js';
 
 const router = express.Router();
 
@@ -36,24 +36,61 @@ router.post('/', authMiddleware, async (req, res) => {
     // Apply recommendation rules
     if (latestScreenTime && latestMood) {
       const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
-      const mood = latestMood.mood;
+      const mood = latestMood.mood.toLowerCase();
 
+      // Check most specific conditions first
       if (totalTime > 300 && mood === 'stressed') {
-        recommendation = {
-          type: 'break',
-          details: { action: 'walk', duration: '5m' },
-          trigger: { screenTime: '>5h', mood: 'stressed' },
-          triggerSource: 'mood',
-          triggerNote: 'Triggered by high screen time and stress',
-        };
+        // Fetch a calm playlist for stressed mood
+        const playlist = await Playlist.findOne({ userId, mood: 'calm' })
+          .sort({ timestamp: -1 })
+          .limit(1)
+          .exec();
+        if (playlist) {
+          recommendation = {
+            type: 'music',
+            details: {
+              playlistId: playlist.spotifyPlaylistId,
+              name: playlist.name,
+            },
+            trigger: { screenTime: '>5h', mood: 'stressed' },
+            triggerSource: 'mood',
+            triggerNote: 'Music suggested for stress',
+          };
+        } else {
+          recommendation = {
+            type: 'break',
+            details: { action: 'stretch', duration: '5m' }, // Changed to avoid confusion with tired
+            trigger: { screenTime: '>5h', mood: 'stressed' },
+            triggerSource: 'mood',
+            triggerNote: 'Triggered by high screen time and stress, no playlist',
+          };
+        }
       } else if (totalTime > 180 && mood === 'tired') {
-        recommendation = {
-          type: 'break',
-          details: { action: 'rest', duration: '10m' },
-          trigger: { screenTime: '>3h', mood: 'tired' },
-          triggerSource: 'mood',
-          triggerNote: 'Triggered by moderate screen time and tiredness',
-        };
+        // Fetch a relax playlist for tired mood
+        const playlist = await Playlist.findOne({ userId, mood: 'tired' })
+          .sort({ timestamp: -1 })
+          .limit(1)
+          .exec();
+        if (playlist) {
+          recommendation = {
+            type: 'music',
+            details: {
+              playlistId: playlist.spotifyPlaylistId,
+              name: playlist.name,
+            },
+            trigger: { screenTime: '>3h', mood: 'tired' },
+            triggerSource: 'mood',
+            triggerNote: 'Music suggested for tiredness',
+          };
+        } else {
+          recommendation = {
+            type: 'break',
+            details: { action: 'rest', duration: '10m' },
+            trigger: { screenTime: '>3h', mood: 'tired' },
+            triggerSource: 'mood',
+            triggerNote: 'Triggered by moderate screen time and tiredness',
+          };
+        }
       } else if (mood === 'happy') {
         recommendation = {
           type: 'message',
@@ -71,15 +108,13 @@ router.post('/', authMiddleware, async (req, res) => {
       userId,
       timestamp: new Date(),
       type: recommendation.type,
-      details: recommendation.type === 'message'
-        ? recommendation.details.message
-        : `Take a ${recommendation.details.duration} ${recommendation.details.action}`,
+      details: JSON.stringify(recommendation.details), // Ensure consistent stringification
       trigger: JSON.stringify(recommendation.trigger),
       accepted: false,
     });
 
     await newRecommendation.save();
-    logger.info('Recommendation saved', { userId, recommendation });
+    logger.info('Recommendation saved', { userId, recommendation: newRecommendation });
 
     // Create TriggerLink
     const newTriggerLink = new TriggerLink({
@@ -100,7 +135,7 @@ router.post('/', authMiddleware, async (req, res) => {
     });
   } catch (error) {
     logger.error('Error generating recommendation:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -128,13 +163,10 @@ router.patch('/:id', authMiddleware, async (req, res) => {
   const { accepted } = req.body;
 
   try {
-    // Validate request body
     if (typeof accepted !== 'boolean') {
-      logger.warn('Validation failed: Accepted field must be a boolean', { userId, recommendationId });
       return res.status(400).json({ message: 'Accepted field must be a boolean' });
     }
 
-    // Find and update the recommendation
     const updatedRecommendation = await Recommendation.findOneAndUpdate(
       { recommendationId, userId },
       { accepted },
@@ -142,7 +174,6 @@ router.patch('/:id', authMiddleware, async (req, res) => {
     );
 
     if (!updatedRecommendation) {
-      logger.warn('Recommendation not found or not authorized', { userId, recommendationId });
       return res.status(404).json({ message: 'Recommendation not found or not authorized' });
     }
 

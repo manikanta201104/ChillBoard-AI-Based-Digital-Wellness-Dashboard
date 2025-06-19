@@ -3,6 +3,7 @@ import SpotifyWebApi from 'spotify-web-api-node';
 import { logger } from '../index.js';
 import { authMiddleware } from '../middleware/auth.js';
 import User from '../models/user.js';
+import Playlist from '../models/playlist.js'; // New: Import Playlist model
 
 const router = express.Router();
 
@@ -188,6 +189,20 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       name: playlist.name,
       mood: mood.toLowerCase(),
     };
+
+    // New: Save to Playlist collection
+    const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
+    if (!existingPlaylist) {
+      const newPlaylist = new Playlist({
+        userId,
+        spotifyPlaylistId: playlist.id,
+        name: playlist.name,
+        mood: mood.toLowerCase(),
+        saved: false
+      });
+      await newPlaylist.save();
+      logger.info('Playlist saved', { userId, playlist: newPlaylist });
+    }
 
     logger.info('Playlist fetched', { userId, playlist: response });
     res.status(200).json(response);

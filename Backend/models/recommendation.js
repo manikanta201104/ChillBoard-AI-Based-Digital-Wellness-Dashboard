@@ -18,7 +18,7 @@ const recommendationSchema = new mongoose.Schema(
     type: {
       type: String,
       required: true,
-      enum: ['break', 'message'],
+      enum: ['break', 'message', 'music'], // Added 'music' to enum
     },
     details: {
       type: String,
