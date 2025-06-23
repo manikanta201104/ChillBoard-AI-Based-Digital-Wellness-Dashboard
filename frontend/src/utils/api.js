@@ -76,3 +76,16 @@ export const initiateSpotifyLogin = async () => {
   });
   return response.data.authorizeURL;
 };
+
+// New function to fetch user data including spotifyToken
+export const getUser = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+
+  const response = await api.get('/auth/user', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data; // Expecting { spotifyToken: { accessToken, refreshToken, ... }, ... }
+};

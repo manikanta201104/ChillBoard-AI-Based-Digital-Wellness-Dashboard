@@ -14,8 +14,12 @@ const spotifyApi = new SpotifyWebApi({
   redirectUri: process.env.SPOTIFY_REDIRECT_URI
 });
 
-// Scopes for Spotify permissions (expanded for testing)
-const scopes = ['user-read-private', 'playlist-read-private', 'playlist-read-collaborative'];
+// Scopes for Spotify permissions (updated to include streaming)
+const scopes = [
+  'user-read-private',
+  'streaming', 
+  'user-read-email' // Optional but recommended for SDK
+];
 
 // Mood to Spotify category mapping
 const moodCategoryMap = {
@@ -190,14 +194,14 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       mood: mood.toLowerCase(),
     };
 
-    // New: Save to Playlist collection
+    // Save playlist with the mapped category
     const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
     if (!existingPlaylist) {
       const newPlaylist = new Playlist({
         userId,
         spotifyPlaylistId: playlist.id,
         name: playlist.name,
-        mood: mood.toLowerCase(),
+        mood: category, // Using mapped category (e.g., 'calm' for 'stressed')
         saved: false
       });
       await newPlaylist.save();

@@ -1,5 +1,3 @@
-
-// File: ChillBoard/Backend/routes/auth.js
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { logger } from '../index.js';
@@ -59,6 +57,36 @@ router.post('/login', async (req, res) => {
     res.status(200).json({ token });
   } catch (error) {
     logger.error('Error during login:', error);
+    throw error;
+  }
+});
+
+// GET /user - New endpoint to fetch user data including spotifyToken
+router.get('/user', async (req, res) => {
+  try {
+    // Extract token from Authorization header
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logger.warn('Unauthorized access: No or invalid token');
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, config.jwtSecret);
+    const user = await User.findById(decoded.userId).select('spotifyToken preferences'); // Only return relevant fields
+
+    if (!user) {
+      logger.warn('User not found', { userId: decoded.userId });
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    logger.info('User data fetched successfully', { userId: decoded.userId });
+    res.status(200).json(user);
+  } catch (error) {
+    logger.error('Error fetching user data:', error);
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ message: 'Invalid token' });
+    }
     throw error;
   }
 });

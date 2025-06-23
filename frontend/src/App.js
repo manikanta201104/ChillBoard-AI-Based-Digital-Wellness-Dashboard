@@ -6,6 +6,7 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import About from './pages/About';
 
+// No changes needed here as routing remains the same
 function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

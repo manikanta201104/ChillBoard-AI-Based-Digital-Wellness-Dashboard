@@ -4,7 +4,8 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin } from '../utils/api';
+import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser } from '../utils/api';
+import SpotifyPlayer from 'react-spotify-web-playback'; // Import the React Spotify Web Playback SDK
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
@@ -20,6 +21,8 @@ const Dashboard = () => {
   const [timer, setTimer] = useState(null);
   const [timerRunning, setTimerRunning] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
+  const [spotifyToken, setSpotifyToken] = useState(''); // New state for Spotify token
+  const [currentPlaylistId, setCurrentPlaylistId] = useState(''); // New state for the playlist ID
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef(0);
@@ -39,13 +42,32 @@ const Dashboard = () => {
       try {
         const data = await getRecommendations();
         setRecommendations(data);
+        // Check if the latest recommendation is music and set the playlist ID
+        const latestRec = data.length > 0 ? data[0] : null;
+        if (latestRec && latestRec.type === 'music') {
+          const details = JSON.parse(latestRec.details); // Parse the stringified details
+          setCurrentPlaylistId(details.playlistId); // Set the playlist ID for the player
+        } else {
+          setCurrentPlaylistId(''); // Clear if not a music recommendation
+        }
       } catch (err) {
         setError(err.message || 'Failed to fetch recommendations');
       }
     };
 
+    const fetchUserData = async () => {
+      try {
+        const userData = await getUser(); // Fetch user data to get spotifyToken
+        setSpotifyToken(userData.spotifyToken.accessToken || ''); // Set the token from user data
+      } catch (err) {
+        setError(err.message || 'Failed to fetch user data');
+        setSpotifyToken(''); // Clear token on error
+      }
+    };
+
     fetchScreenTime();
     fetchRecommendations();
+    fetchUserData(); // Add user data fetch
 
     if (window.chrome && chrome.runtime) {
       chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
@@ -360,7 +382,9 @@ const Dashboard = () => {
         <div className="mb-8">
           <h2 className="text-2xl font-semibold text-center mb-4">Recommendation</h2>
           <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
-            <p className="text-lg font-medium">{latestRecommendation.details}</p>
+            <p className="text-lg font-medium">
+              {latestRecommendation.details.message || latestRecommendation.details} {/* Handle both message and JSON details */}
+            </p>
             <div className="mt-4 flex space-x-4">
               <button
                 onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)}
@@ -404,6 +428,39 @@ const Dashboard = () => {
                     className="mt-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
                   >
                     Start Timer
+                  </button>
+                )}
+              </div>
+            )}
+            {/* Add Spotify player or connect prompt based on recommendation type and token */}
+            {latestRecommendation.type === 'music' && (
+              <div className="mt-4">
+                {spotifyToken ? (
+                  <div>
+                    <p className="text-md font-medium mb-2">Playing: {JSON.parse(latestRecommendation.details).name || 'Loading...'}</p>
+                    <SpotifyPlayer
+                      token={spotifyToken}
+                      uris={[`spotify:playlist:${currentPlaylistId}`]} // Use the playlist ID
+                      play={true} // Auto-play when loaded
+                      callback={state => {
+                        if (state.isPlaying) console.log('Playing:', state.track.name);
+                        else console.log('Paused or stopped');
+                      }}
+                      styles={{
+                        bgColor: '#e5e7eb', // Light gray to match your theme
+                        color: '#1a202c', // Dark text
+                        loaderColor: '#48bb78', // Green loader
+                        sliderColor: '#48bb78',
+                        trackNameColor: '#2d3748',
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <button
+                    onClick={handleSpotifyConnect}
+                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
+                  >
+                    Connect Spotify to Play
                   </button>
                 )}
               </div>
