@@ -1,5 +1,5 @@
 import express from 'express';
-import  {logger}  from '../index.js';
+import { logger } from '../index.js';
 import Mood from '../models/mood.js';
 import { authMiddleware } from '../middleware/auth.js';
 
@@ -39,6 +39,28 @@ router.post('/', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Mood saved' });
   } catch (error) {
     logger.error('Error saving mood:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /mood/latest
+router.get('/latest', authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    const latestMood = await Mood.findOne({ userId })
+      .sort({ timestamp: -1 })
+      .limit(1)
+      .exec();
+
+    if (!latestMood) {
+      return res.status(404).json({ message: 'No mood data found for this user' });
+    }
+
+    logger.info('Latest mood fetched', { userId, mood: latestMood.mood, timestamp: latestMood.timestamp });
+    res.status(200).json(latestMood);
+  } catch (error) {
+    logger.error('Error fetching latest mood:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

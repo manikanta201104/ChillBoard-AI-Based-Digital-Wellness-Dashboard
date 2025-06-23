@@ -1,13 +1,15 @@
-/*global chrome*/
-
+/*global chrome */
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser } from '../utils/api';
-import SpotifyPlayer from 'react-spotify-web-playback'; // Import the React Spotify Web Playback SDK
+import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser, savePlaylist, fetchNewPlaylist, getLatestMood } from '../utils/api';
+import SpotifyPlayer from 'react-spotify-web-playback';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
+
+const MODEL_URL = '/models'; // Local models
+const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/'; // CDN fallback
 
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
@@ -15,18 +17,105 @@ const Dashboard = () => {
   const [error, setError] = useState('');
   const [extensionInstalled, setExtensionInstalled] = useState(true);
   const [webcamEnabled, setWebcamEnabled] = useState(false);
-  const [detectedMood, setDetectedMood] = useState('');
+  const [detectedMood, setDetectedMood] = useState('Detecting mood...');
   const [lastSavedMood, setLastSavedMood] = useState(null);
   const [correctedMood, setCorrectedMood] = useState('');
   const [timer, setTimer] = useState(null);
   const [timerRunning, setTimerRunning] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
-  const [spotifyToken, setSpotifyToken] = useState(''); // New state for Spotify token
-  const [currentPlaylistId, setCurrentPlaylistId] = useState(''); // New state for the playlist ID
+  const [spotifyToken, setSpotifyToken] = useState('');
+  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '' });
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [detectionAttempts, setDetectionAttempts] = useState(0);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef(0);
   const timerRef = useRef(null);
+  const detectionIntervalRef = useRef(null);
+
+  const detectEmotions = async () => {
+    if (!videoRef.current || !webcamEnabled || !modelsLoaded) {
+      console.warn('Emotion detection aborted:', {
+        videoReady: !!videoRef.current,
+        webcamEnabled,
+        modelsLoaded,
+      });
+      setDetectedMood('Emotion detection not ready. Check webcam and model loading.');
+      return;
+    }
+
+    try {
+      const detection = await faceapi
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .withFaceLandmarks()
+        .withFaceExpressions();
+
+      setDetectionAttempts(prev => prev + 1);
+
+      if (detection && detection.expressions) {
+        const expressions = detection.expressions;
+        console.log('Detected expressions:', expressions);
+        const moodMap = {
+          happy: expressions.happy || 0,
+          sad: expressions.sad || 0,
+          angry: expressions.angry || 0,
+          stressed: expressions.fearful || 0,
+          calm: expressions.neutral || 0,
+          neutral: expressions.neutral || 0,
+          surprised: expressions.surprised || 0,
+          disgusted: expressions.disgusted || 0,
+        };
+        const emotions = Object.keys(moodMap).map(key => ({
+          mood: key === 'surprised' ? 'happy' : key === 'disgusted' ? 'angry' : key,
+          confidence: moodMap[key],
+        }));
+        const dominantEmotion = emotions.reduce((prev, current) =>
+          prev.confidence > current.confidence ? prev : current,
+          { mood: 'unknown', confidence: 0 }
+        );
+
+        const moodText = correctedMood || dominantEmotion.mood;
+        const confidence = dominantEmotion.confidence;
+
+        if (confidence > 0.2) {
+          setDetectedMood(`You seem ${moodText} (Confidence: ${(confidence * 100).toFixed(2)}%)`);
+        } else {
+          setDetectedMood('Low confidence in emotion detection');
+        }
+
+        const now = Date.now();
+        const moodToSend = { mood: moodText, confidence };
+
+        if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
+          try {
+            console.log('Sending mood:', moodToSend);
+            await saveMood(moodToSend);
+            console.log('Mood sent:', moodToSend);
+            setLastSavedMood(moodToSend);
+            lastSentRef.current = now;
+          } catch (err) {
+            console.error('Error sending mood to backend:', err);
+            setError('Failed to send mood data to backend.');
+            lastSentRef.current = now;
+          }
+        } else {
+          console.log('Mood not sent: time threshold not met or mood unchanged');
+        }
+
+        setDetectionAttempts(0);
+      } else {
+        console.log('No face detected');
+        setDetectedMood('No face detected. Please center your face in the frame.');
+
+        if (detectionAttempts >= 10) {
+          setDetectedMood('Still no face detected. Ensure good lighting and face the camera directly.');
+        }
+      }
+    } catch (err) {
+      console.error('Error during emotion detection:', err);
+      setDetectedMood('Error detecting emotions');
+    }
+  };
 
   useEffect(() => {
     const fetchScreenTime = async () => {
@@ -42,13 +131,12 @@ const Dashboard = () => {
       try {
         const data = await getRecommendations();
         setRecommendations(data);
-        // Check if the latest recommendation is music and set the playlist ID
         const latestRec = data.length > 0 ? data[0] : null;
         if (latestRec && latestRec.type === 'music') {
-          const details = JSON.parse(latestRec.details); // Parse the stringified details
-          setCurrentPlaylistId(details.playlistId); // Set the playlist ID for the player
+          const details = JSON.parse(latestRec.details);
+          setCurrentPlaylist({ id: details.playlistId, name: details.name });
         } else {
-          setCurrentPlaylistId(''); // Clear if not a music recommendation
+          setCurrentPlaylist({ id: '', name: '' });
         }
       } catch (err) {
         setError(err.message || 'Failed to fetch recommendations');
@@ -57,23 +145,21 @@ const Dashboard = () => {
 
     const fetchUserData = async () => {
       try {
-        const userData = await getUser(); // Fetch user data to get spotifyToken
-        setSpotifyToken(userData.spotifyToken.accessToken || ''); // Set the token from user data
+        const userData = await getUser();
+        setSpotifyToken(userData.spotifyToken.accessToken || '');
       } catch (err) {
         setError(err.message || 'Failed to fetch user data');
-        setSpotifyToken(''); // Clear token on error
+        setSpotifyToken('');
       }
     };
 
     fetchScreenTime();
     fetchRecommendations();
-    fetchUserData(); // Add user data fetch
+    fetchUserData();
 
     if (window.chrome && chrome.runtime) {
       chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
-        if (chrome.runtime.lastError || !response) {
-          setExtensionInstalled(false);
-        }
+        if (chrome.runtime.lastError || !response) setExtensionInstalled(false);
       });
     } else {
       setExtensionInstalled(false);
@@ -81,38 +167,106 @@ const Dashboard = () => {
 
     const loadModels = async () => {
       try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri('/models');
-        await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
-        await faceapi.nets.faceExpressionNet.loadFromUri('/models');
-        console.log('Face-API.js models loaded');
+        console.log('Loading face-api.js models...');
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        console.log('TinyFaceDetector loaded');
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        console.log('FaceLandmark68Net loaded');
+        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+        console.log('FaceExpressionNet loaded');
+        setModelsLoaded(true);
       } catch (err) {
-        console.error('Error loading models:', err);
-        setError('Failed to load emotion detection models');
+        console.warn('Failed to load local models:', err);
+        try {
+          await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
+          console.log('Face-API.js models loaded from CDN');
+          setModelsLoaded(true);
+        } catch (cdnErr) {
+          console.error('Error loading models from CDN:', cdnErr);
+          setError('Failed to load emotion detection models.');
+        }
       }
     };
 
     loadModels();
 
     return () => {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
-      }
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      stopWebcam();
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
 
+  useEffect(() => {
+    if (webcamEnabled && modelsLoaded && videoRef.current) {
+      console.log('Starting webcam');
+      startWebcam();
+    } else if (webcamEnabled && !modelsLoaded) {
+      setError('Emotion detection models are still loading. Please wait...');
+    }
+
+    return () => {
+      if (webcamEnabled) {
+        console.log('Stopping webcam due to effect cleanup');
+        stopWebcam();
+      }
+    };
+  }, [webcamEnabled, modelsLoaded]);
+
+  useEffect(() => {
+    if (webcamEnabled && modelsLoaded && videoRef.current) {
+      console.log('Starting emotion detection');
+      detectionIntervalRef.current = setInterval(detectEmotions, 500);
+
+      return () => {
+        if (detectionIntervalRef.current) {
+          clearInterval(detectionIntervalRef.current);
+          console.log('Emotion detection stopped');
+        }
+      };
+    }
+  }, [webcamEnabled, modelsLoaded, correctedMood]);
+
   const startWebcam = async () => {
+    if (!modelsLoaded) {
+      setError('Models are still loading, please wait...');
+      return;
+    }
+
+    if (!videoRef.current) {
+      console.error('Video element not found in DOM');
+      setError('Video element not found. Please refresh the page.');
+      setWebcamEnabled(false);
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
       streamRef.current = stream;
+      console.log('Webcam stream obtained:', stream);
       videoRef.current.srcObject = stream;
-      setWebcamEnabled(true);
-      videoRef.current.addEventListener('play', detectEmotions);
+      videoRef.current.onloadedmetadata = () => {
+        console.log('Video metadata loaded');
+        videoRef.current.play().then(() => {
+          console.log('Video playback started');
+          setError(''); // Clear any previous errors on success
+        }).catch(err => {
+          console.error('Error playing video:', err);
+          setError('Failed to play webcam video.');
+          stopWebcam();
+        });
+      };
     } catch (err) {
       console.error('Error accessing webcam:', err);
-      setError('Failed to access webcam. Please grant permission.');
+      const errorMsg =
+        err.name === 'NotAllowedError'
+          ? 'Webcam access denied. Please grant camera permission in browser settings.'
+          : err.name === 'NotFoundError'
+          ? 'No webcam found. Please connect a webcam and try again.'
+          : `Failed to access webcam: ${err.message}`;
+      setError(errorMsg);
+      setWebcamEnabled(false);
     }
   };
 
@@ -120,77 +274,38 @@ const Dashboard = () => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
+      console.log('Webcam stream stopped');
+    }
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current);
+      detectionIntervalRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
     setWebcamEnabled(false);
-    setDetectedMood('');
+    setDetectedMood('Detecting mood...');
+    setDetectionAttempts(0);
     setCorrectedMood('');
     setLastSavedMood(null);
-  };
-
-  const detectEmotions = async () => {
-    if (!videoRef.current) return;
-
-    const detection = await faceapi
-      .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions())
-      .withFaceLandmarks()
-      .withFaceExpressions();
-
-    if (detection && detection.expressions) {
-      const expressions = detection.expressions;
-      const emotions = Object.keys(expressions).map(key => ({
-        mood: key,
-        confidence: expressions[key],
-      }));
-      const dominantEmotion = emotions.reduce((prev, current) =>
-        prev.confidence > current.confidence ? prev : current
-      );
-
-      const moodText = correctedMood || dominantEmotion.mood;
-      setDetectedMood(
-        `You seem ${moodText} (Confidence: ${(dominantEmotion.confidence * 100).toFixed(2)}%)`
-      );
-
-      const now = Date.now();
-      const moodToSend = { mood: moodText, confidence: dominantEmotion.confidence };
-      if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
-        try {
-          await saveMood(moodToSend);
-          console.log('Mood sent:', moodToSend);
-          setLastSavedMood(moodToSend);
-          lastSentRef.current = now;
-          const triggerLink = {
-            fromSource: 'mood',
-            data: { mood: moodToSend.mood, confidence: moodToSend.confidence },
-          };
-          console.log('TriggerLink:', triggerLink);
-        } catch (err) {
-          console.error('Error saving mood:', err);
-          setError('Failed to save mood');
-        }
-      }
-    } else {
-      setDetectedMood('No face detected');
-    }
-
-    if (webcamEnabled) {
-      setTimeout(detectEmotions, 100);
-    }
   };
 
   const handleMoodCorrection = async (e) => {
     const newMood = e.target.value;
     setCorrectedMood(newMood);
+
+    if (!newMood) {
+      console.log('No mood selected, skipping send.');
+      return;
+    }
+
     try {
       const moodToSend = { mood: newMood, confidence: 1.0 };
+      console.log('Sending corrected mood:', moodToSend);
       await saveMood(moodToSend);
       console.log('Corrected mood sent:', moodToSend);
       setLastSavedMood(moodToSend);
       lastSentRef.current = Date.now();
-      const triggerLink = {
-        fromSource: 'mood',
-        data: { mood: newMood, confidence: 1.0 },
-      };
-      console.log('TriggerLink:', triggerLink);
       setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
     } catch (err) {
       console.error('Error saving corrected mood:', err);
@@ -202,23 +317,11 @@ const Dashboard = () => {
     const minutes = parseInt(duration);
     setTimer(minutes * 60);
     setTimerRunning(true);
-
-    timerRef.current = setInterval(() => {
-      setTimer((prev) => {
-        if (prev <= 0) {
-          clearInterval(timerRef.current);
-          setTimerRunning(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    timerRef.current = setInterval(() => setTimer(prev => prev <= 0 ? (clearInterval(timerRef.current), setTimerRunning(false), 0) : prev - 1), 1000);
   };
 
   const resetTimer = () => {
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-    }
+    if (timerRef.current) clearInterval(timerRef.current);
     setTimer(null);
     setTimerRunning(false);
   };
@@ -237,7 +340,6 @@ const Dashboard = () => {
       setRecommendations(updatedRecommendations);
     } catch (err) {
       setError('Failed to update recommendation');
-      console.error('Error updating recommendation:', err);
     }
   };
 
@@ -247,67 +349,82 @@ const Dashboard = () => {
       window.location.href = authorizeURL;
     } catch (err) {
       setError('Failed to initiate Spotify login');
-      console.error('Error initiating Spotify login:', err);
+    }
+  };
+
+  const handleSavePlaylist = async () => {
+    if (!currentPlaylist.id) return;
+    try {
+      await savePlaylist(currentPlaylist.id, { saved: true });
+      setError('Playlist saved successfully!');
+    } catch (err) {
+      setError('Failed to save playlist');
+    }
+  };
+
+  const handleSkipPlaylist = async () => {
+    let mood = correctedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase());
+    if (!mood) {
+      try {
+        const latestMood = await getLatestMood();
+        if (latestMood && latestMood.mood) {
+          mood = latestMood.mood;
+          setError(`Using latest mood from collection: ${mood} to fetch a new playlist.`);
+        } else {
+          setError('No mood found in collection. Please enable mood detection or correct the mood.');
+          return;
+        }
+      } catch (err) {
+        setError(`Failed to fetch latest mood: ${err.message}. Falling back to local mood.`);
+        if (lastSavedMood) {
+          mood = lastSavedMood.mood;
+          setError(`Using last saved mood: ${mood} to fetch a new playlist.`);
+        }
+      }
+    }
+    if (!mood) {
+      setError('No mood detected or available to fetch a new playlist. Please enable mood detection or correct the mood.');
+      return;
+    }
+    try {
+      const newPlaylist = await fetchNewPlaylist(mood);
+      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
+      setError('New playlist loaded!');
+    } catch (err) {
+      setError('Failed to fetch new playlist');
     }
   };
 
   const barChartData = {
-    labels: screenTimeData.map((entry) => new Date(entry.date).toLocaleDateString()),
-    datasets: [
-      {
-        label: 'Screen Time (minutes)',
-        data: screenTimeData.map((entry) => Math.floor(entry.totalTime / 60)),
-        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-        borderColor: 'rgba(54, 162, 235, 1)',
-        borderWidth: 1,
-      },
-    ],
+    labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString()),
+    datasets: [{
+      label: 'Screen Time (minutes)',
+      data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
+      backgroundColor: 'rgba(54, 162, 235, 0.6)',
+      borderColor: 'rgba(54, 162, 235, 1)',
+      borderWidth: 1,
+    }],
   };
 
   const pieChartData = {
     labels: [],
-    datasets: [
-      {
-        label: 'Tab Usage (seconds)',
-        data: [],
-        backgroundColor: [
-          'rgba(255, 99, 132, 0.6)',
-          'rgba(54, 162, 235, 0.6)',
-          'rgba(255, 206, 86, 0.6)',
-          'rgba(75, 192, 192, 0.6)',
-          'rgba(153, 102, 255, 0.6)',
-          'rgba(255, 159, 64, 0.6)',
-        ],
-        borderColor: [
-          'rgba(255, 99, 132, 1)',
-          'rgba(54, 162, 235, 1)',
-          'rgba(255, 206, 86, 1)',
-          'rgba(75, 192, 192, 1)',
-          'rgba(153, 102, 255, 1)',
-          'rgba(255, 159, 64, 1)',
-        ],
-        borderWidth: 1,
-      },
-    ],
+    datasets: [{
+      label: 'Tab Usage (seconds)',
+      data: [],
+      backgroundColor: ['rgba(255, 99, 132, 0.6)', 'rgba(54, 162, 235, 0.6)', 'rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)', 'rgba(255, 159, 64, 0.6)'],
+      borderColor: ['rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)', 'rgba(255, 206, 86, 1)', 'rgba(75, 192, 192, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)'],
+      borderWidth: 1,
+    }],
   };
 
   const tabUsageMap = {};
-  screenTimeData.forEach((entry) => {
-    entry.tabs.forEach((tab) => {
-      if (tabUsageMap[tab.url]) {
-        tabUsageMap[tab.url] += tab.timeSpent;
-      } else {
-        tabUsageMap[tab.url] = tab.timeSpent;
-      }
-    });
-  });
-
+  screenTimeData.forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
   pieChartData.labels = Object.keys(tabUsageMap);
   pieChartData.datasets[0].data = Object.values(tabUsageMap);
 
   const handleInstallReminder = () => {
     alert('Please install the ChillBoard Chrome extension to track your screen time!');
-    window.open('https://chrome.google.com/webstore', '_blank');
+    window.open('https://chrome.com/webstore', '_blank');
   };
 
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
@@ -315,177 +432,104 @@ const Dashboard = () => {
   return (
     <div className="min-h-screen bg-gray-100 p-6">
       <h1 className="text-4xl font-bold text-center mb-8">ChillBoard Dashboard</h1>
-
       {error && <p className="text-red-500 text-center mb-4">{error}</p>}
-
       {!extensionInstalled && (
         <div className="text-center mb-8">
           <p className="text-yellow-600 mb-2">ChillBoard extension not detected!</p>
-          <button
-            onClick={handleInstallReminder}
-            className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 transition"
-          >
-            Install Extension
-          </button>
+          <button onClick={handleInstallReminder} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600">Install Extension</button>
         </div>
       )}
-
       <div className="mb-8 text-center">
-        <button
-          onClick={webcamEnabled ? stopWebcam : startWebcam}
-          className={`px-4 py-2 rounded transition ${
-            webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'
-          } text-white`}
-        >
-          {webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}
-        </button>
+        <button onClick={webcamEnabled ? stopWebcam : () => setWebcamEnabled(true)} className={`px-4 py-2 rounded ${webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`} disabled={!modelsLoaded}>{webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}</button>
       </div>
-
       <div className="mb-8 text-center">
-        <button
-          onClick={handleSpotifyConnect}
-          className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
-        >
-          Connect Spotify
-        </button>
+        <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify</button>
       </div>
-
+      <div className="mb-8 flex justify-center">
+        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'}`} playsInline />
+      </div>
       {webcamEnabled && (
-        <div className="mb-8 flex justify-center">
-          <video ref={videoRef} autoPlay muted className="rounded-lg shadow-md w-64 h-48" />
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md">
+          <p className="text-xl font-semibold text-gray-800">{detectedMood}</p>
+          {detectedMood && !detectedMood.includes('No face') && !detectedMood.includes('Error') && (
+            <div className="mt-4">
+              <label className="text-gray-600">Not correct? Select another mood: </label>
+              <select value={correctedMood} onChange={handleMoodCorrection} className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Select mood</option>
+                <option value="happy">Happy</option>
+                <option value="sad">Sad</option>
+                <option value="angry">Angry</option>
+                <option value="stressed">Stressed</option>
+                <option value="calm">Calm</option>
+                <option value="neutral">Neutral</option>
+              </select>
+            </div>
+          )}
         </div>
       )}
-
-      {detectedMood && (
-        <div className="mb-8 text-center">
-          <p className="text-xl font-semibold">{detectedMood}</p>
-          <div className="mt-4">
-            <label className="text-gray-600">Not correct? Select another mood: </label>
-            <select
-              value={correctedMood}
-              onChange={handleMoodCorrection}
-              className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">Select mood</option>
-              <option value="happy">Happy</option>
-              <option value="sad">Sad</option>
-              <option value="angry">Angry</option>
-              <option value="stressed">Stressed</option>
-              <option value="calm">Calm</option>
-              <option value="neutral">Neutral</option>
-            </select>
-          </div>
-        </div>
-      )}
-
       {latestRecommendation && (
         <div className="mb-8">
           <h2 className="text-2xl font-semibold text-center mb-4">Recommendation</h2>
-          <div className="bg-white p-6 rounded-lg shadow-md max-w-md mx-auto">
-            <p className="text-lg font-medium">
-              {latestRecommendation.details.message || latestRecommendation.details} {/* Handle both message and JSON details */}
-            </p>
+          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto">
+            <p className="text-lg font-medium">{latestRecommendation.details.message || JSON.parse(latestRecommendation.details).name}</p>
             <div className="mt-4 flex space-x-4">
-              <button
-                onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)}
-                disabled={actionStatus !== null}
-                className={`px-4 py-2 rounded transition ${
-                  actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'
-                }`}
-              >
-                Accept
-              </button>
-              <button
-                onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)}
-                disabled={actionStatus !== null}
-                className={`px-4 py-2 rounded transition ${
-                  actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'
-                }`}
-              >
-                Decline
-              </button>
+              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'}`}>Accept</button>
+              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'}`}>Decline</button>
             </div>
-            {actionStatus && (
-              <p className="mt-2 text-sm text-gray-600">
-                Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!
-              </p>
-            )}
+            {actionStatus && <p className="mt-2 text-sm text-gray-600">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
             {latestRecommendation.type === 'break' && !actionStatus && (
               <div className="mt-4">
                 {timer !== null ? (
                   <div>
                     <p className="text-xl font-semibold">{formatTime(timer)}</p>
-                    <button
-                      onClick={resetTimer}
-                      className="mt-2 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600 transition"
-                    >
-                      Reset Timer
-                    </button>
+                    <button onClick={resetTimer} className="mt-2 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Reset Timer</button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])}
-                    className="mt-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 transition"
-                  >
-                    Start Timer
-                  </button>
+                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Start Timer</button>
                 )}
               </div>
             )}
-            {/* Add Spotify player or connect prompt based on recommendation type and token */}
             {latestRecommendation.type === 'music' && (
               <div className="mt-4">
                 {spotifyToken ? (
                   <div>
-                    <p className="text-md font-medium mb-2">Playing: {JSON.parse(latestRecommendation.details).name || 'Loading...'}</p>
+                    <p className="text-md font-medium mb-2">Playing: {currentPlaylist.name || 'Loading...'}</p>
                     <SpotifyPlayer
                       token={spotifyToken}
-                      uris={[`spotify:playlist:${currentPlaylistId}`]} // Use the playlist ID
-                      play={true} // Auto-play when loaded
+                      uris={[`spotify:playlist:${currentPlaylist.id}`]}
+                      play={true}
                       callback={state => {
                         if (state.isPlaying) console.log('Playing:', state.track.name);
-                        else console.log('Paused or stopped');
                       }}
                       styles={{
-                        bgColor: '#e5e7eb', // Light gray to match your theme
-                        color: '#1a202c', // Dark text
-                        loaderColor: '#48bb78', // Green loader
+                        bgColor: '#e5e7eb',
+                        color: '#1a202c',
+                        loaderColor: '#48bb78',
                         sliderColor: '#48bb78',
                         trackNameColor: '#2d3748',
                       }}
                     />
+                    <div className="mt-4 flex space-x-4 justify-center">
+                      <button onClick={handleSavePlaylist} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
+                      <button onClick={handleSkipPlaylist} className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Skip</button>
+                    </div>
                   </div>
                 ) : (
-                  <button
-                    onClick={handleSpotifyConnect}
-                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 transition"
-                  >
-                    Connect Spotify to Play
-                  </button>
+                  <button onClick={handleSpotifyConnect} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify to Play</button>
                 )}
               </div>
             )}
           </div>
         </div>
       )}
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         <div className="bg-white p-6 rounded-lg shadow-md">
           <h2 className="text-2xl font-semibold mb-4">Daily Screen Time</h2>
-          {screenTimeData.length > 0 ? (
-            <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} />
-          ) : (
-            <p className="text-gray-500">No screen time data available.</p>
-          )}
+          {screenTimeData.length > 0 ? <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-500">No screen time data available.</p>}
         </div>
-
         <div className="bg-white p-6 rounded-lg shadow-md">
           <h2 className="text-2xl font-semibold mb-4">Tab Usage</h2>
-          {pieChartData.labels.length > 0 ? (
-            <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} />
-          ) : (
-            <p className="text-gray-500">No tab usage data available.</p>
-          )}
+          {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-500">No tab usage data available.</p>}
         </div>
       </div>
     </div>

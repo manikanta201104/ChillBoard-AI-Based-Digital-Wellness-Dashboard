@@ -221,4 +221,27 @@ router.get('/playlist', authMiddleware, async (req, res) => {
   }
 });
 
+router.patch('/playlist/:id',authMiddleware,async(req,res)=>{
+  const{id}=req.params;
+  const{saved}=req.body;
+
+  try{
+    const playlist=await Playlist.findOneAndUpdate(
+      {spotifyPlaylistId:id,userId:req.user.userId},
+      {saved:saved===true},
+      {new:true, runValidators:true}
+    );
+
+    if(!playlist)
+      return res.status(404).json({message:'Playlist nor found'});
+
+    logger.info('Playlist updated',{spotifyPlaylistId:id,saved:playlist.saved});
+    res.status(200).json(playlist);
+  }catch(err){
+    logger.error('Error updating playlist',{error:err.message,stack:err.stack});
+    res.status(500).json({message:'Server error',error:err.message})
+  }
+});
+
+
 export default router;

@@ -89,3 +89,31 @@ export const getUser = async () => {
   });
   return response.data; // Expecting { spotifyToken: { accessToken, refreshToken, ... }, ... }
 };
+
+export const savePlaylist=async(playlistId,data)=>{
+  const token=localStorage.getItem('jwt');
+  if(!token) throw new Error('No token found');
+  const response = await api.patch(`/spotify/playlist/${playlistId}`,data,{
+    headers:{
+      Authorization:`Bearer ${token}`
+    }
+  });
+  return response.data;
+}
+
+export const fetchNewPlaylist=async(mood)=>{
+  const token=localStorage.getItem('jwt');
+  if(!token) throw new Error('No token found');
+  const response=await api.get(`spotify/playlist?mood=${mood}`,{
+    headers:{
+      Authorization:`Bearer ${token}`
+    }
+  });
+  return response.data;
+}
+export const getLatestMood = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.get('/mood/latest', { headers: { Authorization: `Bearer ${token}` } });
+  return response.data;
+};
