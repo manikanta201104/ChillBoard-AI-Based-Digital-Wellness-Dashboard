@@ -8,6 +8,7 @@ import screenTimeRoutes from './routes/screenTime.js';
 import moodRoutes from './routes/mood.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import spotifyRoutes from './routes/spotify.js';
+import challengesRouter from './routes/challenges.js';
 
 dotenv.config();
 
@@ -58,6 +59,7 @@ app.use('/ping', (req, res) => {
   res.status(200).json({ message: 'Pong' });
 });
 app.use('/spotify', spotifyRoutes);
+app.use('/challenges',challengesRouter);
 
 // MongoDB Connection
 mongoose
