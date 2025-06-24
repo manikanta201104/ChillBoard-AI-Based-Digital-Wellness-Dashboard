@@ -133,90 +133,68 @@ router.get('/callback', async (req, res) => {
 });
 
 router.get('/playlist', authMiddleware, async (req, res) => {
-  const userId = req.user.userId; // This is the _id from the JWT
+  const userId = req.user.userId;
   const mood = req.query.mood || 'default';
 
   try {
     const user = await User.findById(userId);
-    if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) {
-      return res.status(400).json({ message: 'Spotify token not found' });
-    }
+    if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) return res.status(400).json({ message: 'Spotify token not found' });
 
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
-
-    // Check if token is expired
     const now = Date.now();
     const tokenExpiry = new Date(obtainedAt).getTime() + (expiresIn * 1000);
     let currentAccessToken = accessToken;
 
-    logger.info('Token status', { userId, now, tokenExpiry, isExpired: now >= tokenExpiry });
-
     if (now >= tokenExpiry) {
-      logger.info('Token expired, attempting refresh', { userId, tokenExpiry });
+      logger.info('Token expired, refreshing', { userId, tokenExpiry });
       currentAccessToken = await refreshAccessToken(userId, refreshToken);
-      if (!currentAccessToken) {
-        return res.status(500).json({ message: 'Failed to refresh access token' });
-      }
-      logger.info('Token refreshed, new token set', { userId });
+      if (!currentAccessToken) return res.status(500).json({ message: 'Failed to refresh access token' });
     } else {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
+    // Check for cached playlist (within 24 hours)
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const cachedPlaylist = await Playlist.findOne({
+      userId,
+      mood: moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default,
+      createdAt: { $gte: twentyFourHoursAgo },
+      saved: { $ne: true } // Avoid returning saved playlists unless needed
+    });
+
+    if (cachedPlaylist) {
+      logger.info('Returning cached playlist', { userId, playlistId: cachedPlaylist.spotifyPlaylistId });
+      return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
+    }
+
     spotifyApi.setAccessToken(currentAccessToken);
-    logger.info('Token set for API call', { userId, token: currentAccessToken.substring(0, 10) + '...' });
 
     const category = moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default;
 
-    logger.info('Searching playlists for category', { category });
     let playlists;
     try {
       playlists = await spotifyApi.searchPlaylists(category, { limit: 1 });
-      logger.info('Playlists response', { body: playlists.body });
+      logger.info('Playlists fetched from Spotify', { category, count: playlists.body.playlists.items.length });
     } catch (searchErr) {
-      logger.error('Spotify API error', {
-        error: searchErr.message,
-        stack: searchErr.stack,
-        body: searchErr.body ? JSON.stringify(searchErr.body) : 'No body',
-        statusCode: searchErr.statusCode,
-        rawResponse: searchErr.response ? searchErr.response.text : 'No response',
-      });
+      logger.error('Spotify API error', { error: searchErr.message, stack: searchErr.stack, statusCode: searchErr.statusCode });
       throw searchErr;
     }
 
-    if (!playlists.body.playlists || playlists.body.playlists.items.length === 0) {
-      return res.status(404).json({ message: 'No playlists found for this mood' });
-    }
+    if (!playlists.body.playlists || playlists.body.playlists.items.length === 0) return res.status(404).json({ message: 'No playlists found for this mood' });
 
     const playlist = playlists.body.playlists.items[0];
-    const response = {
-      spotifyPlaylistId: playlist.id,
-      name: playlist.name,
-      mood: mood.toLowerCase(),
-    };
+    const response = { spotifyPlaylistId: playlist.id, name: playlist.name, mood: mood.toLowerCase() };
 
-    // Save playlist with the mapped category
     const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
     if (!existingPlaylist) {
-      const newPlaylist = new Playlist({
-        userId,
-        spotifyPlaylistId: playlist.id,
-        name: playlist.name,
-        mood: category, // Using mapped category (e.g., 'calm' for 'stressed')
-        saved: false
-      });
+      const newPlaylist = new Playlist({ userId, spotifyPlaylistId: playlist.id, name: playlist.name, mood: category, saved: false });
       await newPlaylist.save();
-      logger.info('Playlist saved', { userId, playlist: newPlaylist });
+      logger.info('New playlist saved', { userId, playlistId: playlist.id });
     }
 
-    logger.info('Playlist fetched', { userId, playlist: response });
     res.status(200).json(response);
   } catch (err) {
-    logger.error('Error fetching playlist', {
-      error: err.message,
-      stack: err.stack,
-      body: err.body ? JSON.stringify(err.body) : 'No body',
-      statusCode: err.statusCode,
-    });
+    logger.error('Error fetching playlist', { error: err.message, stack: err.stack, statusCode: err.statusCode });
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
