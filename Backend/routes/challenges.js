@@ -55,4 +55,31 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+router.post('/join',authMiddleware,async(req,res)=>{
+  const {challengeId}=req.body;
+  const userId=req.user.userId;
+
+  try{
+    if(!challengeId){
+      return res.status(400).json({message:'challengeId is required'});
+    }
+    const challenge=await Challenge.findOne({challengeId});
+    if(!challenge){
+      return res.status(404).json({message:'Challenge not found'});
+    }
+    const participantIndex=challenge.participants.findIndex(p=>p.userId===userId);
+    if(participantIndex!==-1){
+      return res.status(400).json({message:'User already joined this challenge'});
+    }
+
+    challenge.participants.push({userId,reduction:0});
+    await challenge.save();
+    logger.info('User joined challenge',{challengeId,userId});
+    res.status(200).json({message:'Successfully joined challenge',challenge});
+  }catch(err){
+    logger.error('Error joining challenge',{error:err.message,stack:err.stack});
+    res.status(500).json({message:'Server error',error:err.message});
+  }
+})
+
 export default router;
