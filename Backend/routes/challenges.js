@@ -3,6 +3,9 @@ import ScreenTime from '../models/screenTime.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../index.js';
 import Challenge from '../models/challenge.js';
+import User from '../models/user.js';
+import mongoose from 'mongoose';
+
 
 const router = express.Router();
 
@@ -11,9 +14,9 @@ router.post('/', authMiddleware, async (req, res) => {
 
   try {
     if (!title || !duration || !goal || !startDate) {
-      return res
-        .status(400)
-        .json({ message: 'Title, duration, goal, and startDate are required' });
+      return res.status(400).json({
+        message: 'Title, duration, goal, and startDate are required',
+      });
     }
 
     const parsedStartDate = new Date(startDate);
@@ -45,6 +48,7 @@ router.post('/', authMiddleware, async (req, res) => {
   }
 });
 
+
 router.get('/', authMiddleware, async (req, res) => {
   try {
     const now = new Date();
@@ -70,6 +74,7 @@ router.get('/', authMiddleware, async (req, res) => {
         ],
       },
     }).sort({ startDate: 1 });
+
     logger.info('Challenges fetched', { count: challenges.length });
     res.status(200).json(challenges);
   } catch (err) {
@@ -81,33 +86,32 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
+
 router.post('/join', authMiddleware, async (req, res) => {
   const { challengeId } = req.body;
-  const userId = req.user.userId;
+  const userId = req.user.userId; // ✅ Always from token
 
   try {
     if (!challengeId) {
       return res.status(400).json({ message: 'challengeId is required' });
     }
+
     const challenge = await Challenge.findOne({ challengeId });
     if (!challenge) {
       return res.status(404).json({ message: 'Challenge not found' });
     }
-    const participantIndex = challenge.participants.findIndex(
-      p => p.userId === userId
-    );
-    if (participantIndex !== -1) {
-      return res
-        .status(400)
-        .json({ message: 'User already joined this challenge' });
+
+    const alreadyJoined = challenge.participants.some(p => p.userId === userId);
+    if (alreadyJoined) {
+      return res.status(400).json({ message: 'User already joined this challenge' });
     }
 
+    // ✅ Ensure we always push user.userId (not _id)
     challenge.participants.push({ userId, reduction: 0 });
     await challenge.save();
+
     logger.info('User joined challenge', { challengeId, userId });
-    res
-      .status(200)
-      .json({ message: 'Successfully joined challenge', challenge });
+    res.status(200).json({ message: 'Successfully joined challenge', challenge });
   } catch (err) {
     logger.error('Error joining challenge', {
       error: err.message,
@@ -133,39 +137,27 @@ router.post('/progress', authMiddleware, async (req, res) => {
 
     const participant = challenge.participants.find(p => p.userId === userId);
     if (!participant) {
-      return res
-        .status(403)
-        .json({ message: 'User not participating in this challenge' });
+      return res.status(403).json({ message: 'User not participating in this challenge' });
     }
 
     const now = new Date();
     const startDate = challenge.startDate;
-    const endDate = new Date(
-      startDate.getTime() + challenge.duration * 24 * 60 * 60 * 1000
-    );
+    const endDate = new Date(startDate.getTime() + challenge.duration * 24 * 60 * 60 * 1000);
 
     if (now < startDate || now > endDate) {
       return res.status(400).json({ message: 'Challenge is not active' });
     }
 
-    // Fetch baseline (7 days before startDate, up to the day before startDate)
     const baselineStart = new Date(startDate.getTime() - 7 * 24 * 60 * 60 * 1000);
     const baselineEnd = new Date(startDate.getTime() - 1 * 24 * 60 * 60 * 1000);
-
-    // Set to midnight UTC for range
     const startOfBaselineStart = new Date(Date.UTC(baselineStart.getUTCFullYear(), baselineStart.getUTCMonth(), baselineStart.getUTCDate()));
     const startOfBaselineEnd = new Date(Date.UTC(baselineEnd.getUTCFullYear(), baselineEnd.getUTCMonth(), baselineEnd.getUTCDate(), 23, 59, 59, 999));
-
-    logger.info('Baseline query', { startOfBaselineStart, startOfBaselineEnd, userId, startDate });
 
     const baselineData = await ScreenTime.aggregate([
       {
         $match: {
           userId,
-          date: {
-            $gte: startOfBaselineStart,
-            $lte: startOfBaselineEnd,
-          },
+          date: { $gte: startOfBaselineStart, $lte: startOfBaselineEnd },
         },
       },
       {
@@ -182,28 +174,22 @@ router.post('/progress', authMiddleware, async (req, res) => {
     }
 
     const baselineTotalTime = baselineData[0].avgTotalTime;
-    logger.info('Baseline calculation', { baselineTotalTime, count: baselineData[0].count });
 
-    // Fetch the latest available ScreenTime (current or most recent day)
     const currentDay = new Date(now.toISOString().split('T')[0]);
     let currentData = await ScreenTime.findOne({ userId, date: currentDay });
     if (!currentData) {
-      // Fallback to the most recent day if current day data is missing
       currentData = await ScreenTime.findOne({ userId, date: { $lt: currentDay } }).sort({ date: -1 });
     }
-    const currentTotalTime = currentData ? currentData.totalTime : baselineTotalTime; // Default to baseline if no data
-    logger.info('Current day data', { currentTotalTime, date: currentData ? currentData.date : currentDay });
 
-    // Calculate daily reduction (in hours), capped at goal
+    const currentTotalTime = currentData ? currentData.totalTime : baselineTotalTime;
+
     const dailyReduction = Math.min(challenge.goal / 60, Math.max(0, (baselineTotalTime - currentTotalTime) / 3600));
-    const totalReduction = participant.reduction + dailyReduction; // Accumulate reduction
-
-    // Update reduction, ensuring it doesn’t exceed the goal times duration
+    const totalReduction = participant.reduction / 3600 + dailyReduction;
     const maxReduction = (challenge.goal / 60) * challenge.duration;
-    participant.reduction = Math.min(totalReduction, maxReduction);
+    participant.reduction = Math.min(totalReduction, maxReduction) * 3600;
+
     await challenge.save();
-    logger.info('Progress updated', { challengeId, userId, reduction: participant.reduction });
-    res.status(200).json({ message: 'Progress updated', reduction: participant.reduction });
+    res.status(200).json({ message: 'Progress updated', reduction: participant.reduction / 3600 });
   } catch (err) {
     logger.error('Error updating progress', {
       error: err.message,
@@ -212,5 +198,63 @@ router.post('/progress', authMiddleware, async (req, res) => {
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
+
+
+router.get('/leaderboard', authMiddleware, async (req, res) => {
+  try {
+    const { challengeId } = req.query;
+    if (!challengeId) {
+      return res.status(400).json({ message: 'challengeId is required' });
+    }
+
+    const challenge = await Challenge.findOne({ challengeId }).lean();
+    if (!challenge) {
+      return res.status(404).json({ message: 'Challenge not found' });
+    }
+
+    const rankedParticipants = challenge.participants
+      .sort((a, b) => b.reduction - a.reduction)
+      .slice(0, 10)
+      .map((participant, index) => ({ rank: index + 1, ...participant }));
+
+    const allUserIds = rankedParticipants.map(p => p.userId);
+
+    // Fetch both userId and _id for matching flexibility
+    const users = await User.find({
+      $or: [
+        { userId: { $in: allUserIds } },
+        { _id: { $in: allUserIds.map(id => {
+          try {
+            return new mongoose.Types.ObjectId(id);
+          } catch {
+            return null;
+          }
+        }).filter(id => id !== null) } },
+      ],
+    }, 'username userId _id').lean();
+
+    const leaderboard = rankedParticipants.map(participant => {
+      const match = users.find(
+        u => u.userId === participant.userId || u._id.toString() === participant.userId
+      );
+
+      return {
+        rank: participant.rank,
+        userId: participant.userId,
+        username: match ? match.username : 'Anonymous',
+        reduction: participant.reduction / 3600,
+      };
+    });
+
+    res.status(200).json(leaderboard);
+  } catch (err) {
+    logger.error('Error fetching leaderboard', {
+      error: err.message,
+      stack: err.stack,
+    });
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
 
 export default router;

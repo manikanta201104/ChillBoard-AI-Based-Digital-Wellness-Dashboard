@@ -1,9 +1,9 @@
 import mongoose from 'mongoose';
 
-const participantSchema=new mongoose.Schema({
-  userId:{type:String,required:true},
-  reduction:{type:Number,default:0},
-})
+const participantSchema = new mongoose.Schema({
+  userId: { type: String, required: true }, // Matches user.userId
+  reduction: { type: Number, default: 0 },
+});
 
 const challengeSchema = new mongoose.Schema(
   {
@@ -13,7 +13,7 @@ const challengeSchema = new mongoose.Schema(
     duration: { type: Number, required: true }, // in days
     goal: { type: Number, required: true }, // e.g., "Reduce screen time by 30%"
     startDate: { type: Date, required: true },
-    participants: [participantSchema], // Array of userIds
+    participants: [participantSchema], // Array of user.userId
     createdAt: { type: Date, default: Date.now },
   },
   { timestamps: true }
