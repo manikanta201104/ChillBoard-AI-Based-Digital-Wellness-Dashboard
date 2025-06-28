@@ -221,5 +221,26 @@ router.patch('/playlist/:id',authMiddleware,async(req,res)=>{
   }
 });
 
+router.delete('/unlink',authMiddleware,async(req,res)=>{
+  try{
+    const userId=req.user.userId;
+    if(!userId) return res.status(401).json({message:'Unauthorized'});
+
+    const user=await User.findById(userId);
+    if(!user) return res.status(400).json({message:'User not found'});
+
+    user.spotifyToken=null;
+    await user.save();
+
+    await Playlist.deleteMany({userId,saved:true});
+
+    logger.info('Spotify account unlinked successfully',{userId});
+    res.status(200).json({message:'Spotify account unlinked successfully'});
+  }catch(error){
+    logger.error('Error unlinking Spotify account',{error:error.message,stack:error.stack});
+    res.status(500).json({message:error.message});
+  }
+})
+
 
 export default router;

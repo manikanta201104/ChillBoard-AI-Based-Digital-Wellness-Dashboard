@@ -35,7 +35,7 @@ app.use(cors({
     'chrome-extension://<your-extension-id>', // Replace with your extension ID
     '*'
   ],
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS','DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 

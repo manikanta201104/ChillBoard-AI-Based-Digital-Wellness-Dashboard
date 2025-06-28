@@ -163,3 +163,25 @@ export const getLeaderboard = async challengeId => {
   });
   return response.data;
 };
+
+export const unlinkSpotify=async()=>{
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.delete('/spotify/unlink', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data;
+}
+
+export const getUserPlaylists=async()=>{
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.get('/auth/playlists', {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  return response.data;
+}

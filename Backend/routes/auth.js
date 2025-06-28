@@ -3,6 +3,8 @@ import jwt from 'jsonwebtoken';
 import { logger } from '../index.js';
 import User from '../models/user.js';
 import { config } from '../config/env.js';
+import { authMiddleware } from '../middleware/auth.js';
+import Playlist from '../models/playlist.js';
 
 const router = express.Router();
 
@@ -61,7 +63,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-
 /**
  * GET /auth/profile
  * Returns the authenticated user's profile.
@@ -85,20 +86,21 @@ router.get('/profile', async (req, res) => {
       return res.status(401).json({ message: 'Invalid token' });
     }
 
-    const user = await User.findById(decoded.userId).select('username email');
+    const user = await User.findById(decoded.userId).select('username email spotifyToken');
     if (!user) {
       logger.warn('User not found', { userId: decoded.userId });
       return res.status(404).json({ message: 'User not found' });
     }
 
     logger.info('Profile fetched successfully', { userId: decoded.userId });
-    res.status(200).json({ username: user.username, email: user.email });
+    res.status(200).json({ username: user.username, email: user.email, spotifyToken: user.spotifyToken });
   } catch (error) {
     logger.error('Error fetching profile:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });
-// GET /user - New endpoint to fetch user data including spotifyToken
+
+// GET /user - Fetch user data including spotifyToken
 router.get('/user', async (req, res) => {
   try {
     // Extract token from Authorization header
@@ -128,5 +130,24 @@ router.get('/user', async (req, res) => {
   }
 });
 
+
+/**
+ * GET /auth/playlists
+ * Returns the authenticated user's saved playlists.
+ * Requires a valid JWT in the Authorization header.
+ */
+router.get ('/playlists', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const playlists = await Playlist.find ({userId, saved: true}).select (
+      'name mood spotifyPlaylistId'
+    );
+    logger.info ('Playlists fetched successfully', {userId});
+    res.status (200).json (playlists);
+  } catch (error) {
+    logger.error ('Error fetching playlists:', error);
+    res.status (500).json ({message: 'Internal server error'});
+  }
+});
 
 export default router;
