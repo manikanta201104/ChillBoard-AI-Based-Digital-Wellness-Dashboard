@@ -61,6 +61,43 @@ router.post('/login', async (req, res) => {
   }
 });
 
+
+/**
+ * GET /auth/profile
+ * Returns the authenticated user's profile.
+ * Requires a valid JWT in the Authorization header.
+ */
+router.get('/profile', async (req, res) => {
+  try {
+    // Extract token from Authorization header
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      logger.warn('Unauthorized access: No or invalid token');
+      return res.status(401).json({ message: 'No token provided' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    let decoded;
+    try {
+      decoded = jwt.verify(token, config.jwtSecret);
+    } catch (err) {
+      logger.warn('Invalid token', { error: err.message });
+      return res.status(401).json({ message: 'Invalid token' });
+    }
+
+    const user = await User.findById(decoded.userId).select('username email');
+    if (!user) {
+      logger.warn('User not found', { userId: decoded.userId });
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    logger.info('Profile fetched successfully', { userId: decoded.userId });
+    res.status(200).json({ username: user.username, email: user.email });
+  } catch (error) {
+    logger.error('Error fetching profile:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
 // GET /user - New endpoint to fetch user data including spotifyToken
 router.get('/user', async (req, res) => {
   try {
@@ -90,5 +127,6 @@ router.get('/user', async (req, res) => {
     throw error;
   }
 });
+
 
 export default router;
