@@ -3,7 +3,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser, savePlaylist, fetchNewPlaylist, getLatestMood } from '../utils/api';
+import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser, savePlaylist, fetchNewPlaylist, getLatestMood, getLeaderboard, getChallenges } from '../utils/api';
 import SpotifyPlayer from 'react-spotify-web-playback';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
@@ -14,6 +14,7 @@ const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
   const [recommendations, setRecommendations] = useState([]);
+  const [leaderboard, setLeaderboard] = useState([]);
   const [error, setError] = useState('');
   const [extensionInstalled, setExtensionInstalled] = useState(true);
   const [webcamEnabled, setWebcamEnabled] = useState(false);
@@ -27,6 +28,7 @@ const Dashboard = () => {
   const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '' });
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef(0);
@@ -117,6 +119,27 @@ const Dashboard = () => {
     }
   };
 
+  const fetchLeaderboard = async () => {
+    setLeaderboardLoading(true);
+    try {
+      const challenges = await getChallenges();
+      const joined = challenges.find(challenge => 
+        challenge.participants.some(p => p.userId === localStorage.getItem('userId'))
+      );
+      if (joined) {
+        const data = await getLeaderboard(joined.challengeId);
+        setLeaderboard(data.slice(0, 3)); // Top 3 for snippet
+      } else {
+        setLeaderboard([]);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to fetch leaderboard');
+      setLeaderboard([]);
+    } finally {
+      setLeaderboardLoading(false);
+    }
+  };
+
   useEffect(() => {
     const fetchScreenTime = async () => {
       try {
@@ -156,6 +179,7 @@ const Dashboard = () => {
     fetchScreenTime();
     fetchRecommendations();
     fetchUserData();
+    fetchLeaderboard();
 
     if (window.chrome && chrome.runtime) {
       chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
@@ -196,7 +220,7 @@ const Dashboard = () => {
       stopWebcam();
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, []);
+  }, [localStorage.getItem('userId')]); // Re-fetch when userId changes
 
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
@@ -445,6 +469,24 @@ const Dashboard = () => {
       <div className="mb-8 text-center">
         <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify</button>
       </div>
+      {leaderboardLoading ? (
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
+          <p className="text-gray-600">Loading leaderboard...</p>
+        </div>
+      ) : leaderboard.length > 0 ? (
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
+          <h2 className="text-xl font-semibold text-gray-800 mb-2">Top 3 Leaders</h2>
+          {leaderboard.map((entry, index) => (
+            <p key={index} className="text-gray-700 mb-1">
+              #{entry.rank} {entry.username}: {entry.reduction.toFixed(1)} hours
+            </p>
+          ))}
+        </div>
+      ) : (
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
+          <p className="text-gray-600">No leaderboard data available. Join a challenge to see rankings!</p>
+        </div>
+      )}
       <div className="mb-8 flex justify-center">
         <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'}`} playsInline />
       </div>
