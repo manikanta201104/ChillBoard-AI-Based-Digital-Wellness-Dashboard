@@ -1,10 +1,42 @@
-import React,{ useState } from "react";
+import React,{ useEffect, useState } from "react";
+import { getUser,saveSettings } from "../utils/api";
 
 const Settings=()=>{
     const [webcamEnabled,setWebcamEnabled]=useState(false);
     const [notificationFrequency,setNotificationFrequency]=useState('Off');
     const [showNameOnLeaderboard, setShowNameOnLeaderboard]=useState(true);
+    const [message,setMessage]=useState('');
 
+    useEffect(()=>{
+        const fetchSettings=async()=>{
+            try{
+                const user=await getUser();
+                const prefs=user.preferences||{};
+                setWebcamEnabled(prefs.webcamEnabled||false);
+                setNotificationFrequency(prefs.notifyEvery||'Off');
+                setShowNameOnLeaderboard(prefs.showNameOnLeaderboard||true);
+            }catch(error){
+                console.error('Failed to fetch settings:',error);
+            }
+        };
+        fetchSettings();
+    },[]);
+
+    const handleSave=async()=>{
+        try{
+            await saveSettings({
+                webcamEnabled,
+                notifyEvery:notificationFrequency,
+                showNameOnLeaderboard,
+            });
+            setMessage('Settings saved successfully');
+            setTimeout(()=>setMessage(''),3000);
+        }catch(error){
+            setMessage('Failed to save settings');
+            setTimeout(()=>setMessage(''),3000);
+            console.error('Save error:',error);
+        }
+    };
     return(
         <div className="min-h-screen bg-gray-100 p-6">
             <h1 className="text-4xl font-bold text-gray-800 text-center mb-8">Settings</h1>
@@ -46,6 +78,13 @@ const Settings=()=>{
                     </label>
                     {showNameOnLeaderboard && <p className="text-sm text-gray-500 mt-1">Switch off for anonymous participation.</p>}
                 </div>
+                <button
+                onClick={handleSave}
+                className="w-full bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+                >
+                Save
+                </button>
+                {message&&<p className="mt-4 text-center text-green-600">{message}</p>}
             </div>
         </div>
     );

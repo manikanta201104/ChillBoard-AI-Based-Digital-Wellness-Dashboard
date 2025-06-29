@@ -185,3 +185,13 @@ export const getUserPlaylists=async()=>{
   });
   return response.data;
 }
+
+export const saveSettings=async(settingsData)=>{
+  const token=localStorage.getItem('jwt');
+  if(!token) throw new Error('No token found');
+  const response=await api.post('/auth/settings',settingsData,{
+    headers:{
+      Authorization:`Bearer ${token}`,
+    },
+  });
+};
