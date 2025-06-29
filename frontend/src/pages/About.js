@@ -26,14 +26,14 @@ const About = () => {
   return (
     <div className="min-h-screen bg-green-50 p-6 sm:p-2 md:p-6">
       <h1 className="text-4xl font-bold text-blue-600 text-center mb-8 sm:text-3xl">About ChillBoard & Help</h1>
-      <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow-md space-y-6 md:space-y-8">
-        <section className="mb-6">
+      <div className="max-w-3xl mx-auto bg-white p-6 rounded-lg shadow-md space-y-6 sm:space-y-4 sm:flex-col sm:mx-auto">
+        <section className="mb-6 sm:mb-4">
           <h2 className="text-2xl font-semibold text-blue-600 mb-2 sm:text-xl">Mission Statement</h2>
           <p className="text-gray-700 sm:text-sm">
             ChillBoard aims to combat digital fatigue with AI-driven wellness tools. Our mission is to help users achieve a balanced digital life by tracking screen time, detecting moods, and offering personalized recommendations, all while fostering a supportive community through challenges.
           </p>
         </section>
-        <section className="mb-6">
+        <section className="mb-6 sm:mb-4">
           <h2 className="text-2xl font-semibold text-blue-600 mb-2 sm:text-xl">Guides</h2>
           <ol className="list-decimal pl-5 space-y-2 text-gray-700 sm:text-sm">
             <li>Install the Chrome extension to track your screen time.</li>
@@ -42,7 +42,7 @@ const About = () => {
             <li>Explore your Profile page for trends and saved Spotify playlists.</li>
           </ol>
         </section>
-        <section>
+        <section className="mb-6 sm:mb-4">
           <h2 className="text-2xl font-semibold text-blue-600 mb-2 sm:text-xl">Privacy Policy</h2>
           <ul className="list-disc pl-5 space-y-2 text-gray-700 sm:text-sm">
             <li>Webcam data is processed locally and never stored or shared.</li>
@@ -53,7 +53,7 @@ const About = () => {
         </section>
         <section>
           <h2 className="text-2xl font-semibold text-blue-600 mb-2 sm:text-xl">Contact Us</h2>
-          <form onSubmit={handleSubmit} className="space-y-4 border border-blue-200 p-4 rounded-lg">
+          <form onSubmit={handleSubmit} className="space-y-4 border border-blue-200 p-4 rounded-lg sm:mx-auto sm:w-full">
             <div>
               <label className="block text-gray-700 sm:text-sm">Name</label>
               <input 
