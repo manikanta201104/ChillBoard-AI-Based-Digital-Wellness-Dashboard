@@ -92,29 +92,30 @@ const Profile = () => {
       {error && <p className="text-center text-red-500 mb-4 sm:text-sm">{error}</p>}
       {!loading && (
         <div className="max-w-4xl mx-auto bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-2xl font-semibold text-gray-700 mb-4">User Details</h2>
-          <div className="space-y-2 bg-blue-100 p-4 rounded-lg">
-            <p className="text-gray-700">Username: {userData.username}</p>
-            <p className="text-gray-700">Email: {userData.email}</p>
-          </div>
-          <h2 className="text-2xl font-semibold text-gray-700 mt-8 mb-4">Trends</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-green-50 p-4 rounded-lg">
-            <div className="bg-white p-4 rounded-lg">
-              <h3 className="text-xl font-medium text-gray-700 mb-2">Screen Time Trends</h3>
-              <p className="text-gray-600 sm:text-sm">Placeholder for weekly averages (to be implemented).</p>
-              <Bar data={screenTimeTrend} options={chartOptions} />
+          <div className="flex flex-col sm:flex-col gap-6">
+            <div className="space-y-2 bg-blue-100 p-4 rounded-lg sm:w-full">
+              <h2 className="text-2xl font-semibold text-gray-700 mb-4 sm:text-xl">User Details</h2>
+              <p className="text-gray-700 sm:text-sm">Username: {userData.username}</p>
+              <p className="text-gray-700 sm:text-sm">Email: {userData.email}</p>
             </div>
-            <div className="bg-white p-4 rounded-lg">
-              <h3 className="text-xl font-medium text-gray-700 mb-2">Mood Trends</h3>
-              <p className="text-gray-600 sm:text-sm">Placeholder for mood frequency (to be implemented).</p>
-              <Bar data={moodTrend} options={chartOptions} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-green-50 p-4 rounded-lg sm:flex-col sm:w-full">
+              <div className="bg-white p-4 rounded-lg sm:w-full">
+                <h3 className="text-xl font-medium text-gray-700 mb-2 sm:text-lg">Screen Time Trends</h3>
+                <p className="text-gray-600 sm:text-sm">Placeholder for weekly averages (to be implemented).</p>
+                <Bar data={screenTimeTrend} options={chartOptions} />
+              </div>
+              <div className="bg-white p-4 rounded-lg sm:w-full">
+                <h3 className="text-xl font-medium text-gray-700 mb-2 sm:text-lg">Mood Trends</h3>
+                <p className="text-gray-600 sm:text-sm">Placeholder for mood frequency (to be implemented).</p>
+                <Bar data={moodTrend} options={chartOptions} />
+              </div>
             </div>
           </div>
-          <h2 className="text-2xl font-semibold text-gray-700 mt-8 mb-4">Playlists</h2>
+          <h2 className="text-2xl font-semibold text-gray-700 mt-8 mb-4 sm:text-xl">Playlists</h2>
           {playlists.length > 0 ? (
-            <ul className="list-disc pl-5 space-y-2">
+            <ul className="list-disc pl-5 space-y-2 sm:w-full">
               {playlists.map((playlist, index) => (
-                <li key={index} className="text-gray-700 border border-blue-200 p-2 rounded hover:bg-green-100 sm:text-sm">
+                <li key={index} className="text-gray-700 border border-blue-200 p-2 rounded hover:bg-green-100 sm:w-full sm:text-sm">
                   <a
                     href={`https://open.spotify.com/playlist/${playlist.spotifyPlaylistId}`}
                     target="_blank"
