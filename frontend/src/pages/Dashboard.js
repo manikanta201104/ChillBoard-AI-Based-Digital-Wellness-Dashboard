@@ -220,7 +220,7 @@ const Dashboard = () => {
       stopWebcam();
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [localStorage.getItem('userId')]); // Re-fetch when userId changes
+  }, [localStorage.getItem('userId')]);
 
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
@@ -424,8 +424,8 @@ const Dashboard = () => {
     datasets: [{
       label: 'Screen Time (minutes)',
       data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
-      backgroundColor: 'rgba(34, 197, 94, 0.6)', // fill-green-300 variant
-      borderColor: 'rgba(59, 130, 246, 1)', // stroke-blue-400
+      backgroundColor: 'rgba(34, 197, 94, 0.6)',
+      borderColor: 'rgba(59, 130, 246, 1)',
       borderWidth: 1,
     }],
   };
@@ -455,19 +455,19 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen bg-green-50 p-4 md:p-6">
-      <h1 className="text-4xl font-bold text-center mb-8 text-gray-700">ChillBoard Dashboard</h1>
-      {error && <p className="text-red-500 text-center mb-4">{error}</p>}
+      <h1 className="text-4xl font-bold text-center mb-8 text-gray-700 sm:text-2xl">ChillBoard Dashboard</h1>
+      {error && <p className="text-red-500 text-center mb-4 sm:text-sm">{error}</p>}
       {!extensionInstalled && (
         <div className="text-center mb-8">
           <p className="text-yellow-600 mb-2 sm:text-sm">ChillBoard extension not detected!</p>
-          <button onClick={handleInstallReminder} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600">Install Extension</button>
+          <button onClick={handleInstallReminder} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 sm:text-sm">Install Extension</button>
         </div>
       )}
       <div className="mb-8 text-center">
         <button onClick={webcamEnabled ? stopWebcam : () => setWebcamEnabled(true)} className={`px-4 py-2 rounded ${webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`} disabled={!modelsLoaded}>{webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}</button>
       </div>
       <div className="mb-8 text-center">
-        <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify</button>
+        <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:text-sm">Connect Spotify</button>
       </div>
       {leaderboardLoading ? (
         <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
@@ -487,15 +487,15 @@ const Dashboard = () => {
           <p className="text-gray-700 sm:text-sm">No leaderboard data available. Join a challenge to see rankings!</p>
         </div>
       )}
-      <div className="mb-8 flex justify-center">
-        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'} border border-blue-200`} playsInline />
+      <div className="mb-8 flex justify-center sm:w-full">
+        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'} border border-blue-200 sm:w-full sm:h-32`} playsInline />
       </div>
       {webcamEnabled && (
         <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md border border-blue-200">
-          <p className="text-xl font-semibold text-gray-700">{detectedMood}</p>
+          <p className="text-xl font-semibold text-gray-700 sm:text-lg">{detectedMood}</p>
           {detectedMood && !detectedMood.includes('No face') && !detectedMood.includes('Error') && (
             <div className="mt-4">
-              <label className="text-gray-700">Not correct? Select another mood: </label>
+              <label className="text-gray-700 sm:text-sm">Not correct? Select another mood: </label>
               <select value={correctedMood} onChange={handleMoodCorrection} className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500 sm:text-sm">
                 <option value="">Select mood</option>
                 <option value="happy">Happy</option>
@@ -510,32 +510,32 @@ const Dashboard = () => {
         </div>
       )}
       {latestRecommendation && (
-        <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-center mb-4 text-gray-700">Recommendation</h2>
-          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto border border-blue-200">
-            <p className="text-lg font-medium text-gray-700">{latestRecommendation.details.message || JSON.parse(latestRecommendation.details).name}</p>
-            <div className="mt-4 flex space-x-4 justify-center">
-              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'}`}>Accept</button>
-              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'}`}>Decline</button>
+        <div className="mb-8 sm:w-full">
+          <h2 className="text-2xl font-semibold text-center mb-4 text-gray-700 sm:text-xl">Recommendation</h2>
+          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto border border-blue-200 sm:w-full sm:p-4">
+            <p className="text-lg font-medium text-gray-700 sm:text-base">{latestRecommendation.details.message || JSON.parse(latestRecommendation.details).name}</p>
+            <div className="mt-4 flex space-x-4 justify-center sm:flex-col sm:space-y-2 sm:space-x-0">
+              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'} sm:w-full`}>Accept</button>
+              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'} sm:w-full`}>Decline</button>
             </div>
-            {actionStatus && <p className="mt-2 text-sm text-gray-700">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
+            {actionStatus && <p className="mt-2 text-sm text-gray-700 sm:text-xs">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
             {latestRecommendation.type === 'break' && !actionStatus && (
-              <div className="mt-4">
+              <div className="mt-4 sm:w-full">
                 {timer !== null ? (
                   <div>
-                    <p className="text-xl font-semibold text-gray-700">{formatTime(timer)}</p>
-                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Reset Timer</button>
+                    <p className="text-xl font-semibold text-gray-700 sm:text-lg">{formatTime(timer)}</p>
+                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Reset Timer</button>
                   </div>
                 ) : (
-                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Start Timer</button>
+                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Start Timer</button>
                 )}
               </div>
             )}
             {latestRecommendation.type === 'music' && (
-              <div className="mt-4">
+              <div className="mt-4 sm:w-full">
                 {spotifyToken ? (
                   <div>
-                    <p className="text-md font-medium mb-2 text-gray-700">Playing: {currentPlaylist.name || 'Loading...'}</p>
+                    <p className="text-md font-medium mb-2 text-gray-700 sm:text-sm">Playing: {currentPlaylist.name || 'Loading...'}</p>
                     <SpotifyPlayer
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
@@ -550,27 +550,28 @@ const Dashboard = () => {
                         sliderColor: '#48bb78',
                         trackNameColor: '#2d3748',
                       }}
+                      className="w-full sm:w-full sm:h-32"
                     />
-                    <div className="mt-4 flex space-x-4 justify-center">
-                      <button onClick={handleSavePlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Save</button>
-                      <button onClick={handleSkipPlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Skip</button>
+                    <div className="mt-4 flex space-x-4 justify-center sm:flex-col sm:space-y-2 sm:space-x-0">
+                      <button onClick={handleSavePlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Save</button>
+                      <button onClick={handleSkipPlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Skip</button>
                     </div>
                   </div>
                 ) : (
-                  <button onClick={handleSpotifyConnect} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify to Play</button>
+                  <button onClick={handleSpotifyConnect} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:text-sm">Connect Spotify to Play</button>
                 )}
               </div>
             )}
           </div>
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700">Daily Screen Time</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:flex-col sm:gap-4">
+        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
+          <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Daily Screen Time</h2>
           {screenTimeData.length > 0 ? <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No screen time data available.</p>}
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700">Tab Usage</h2>
+        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
+          <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Tab Usage</h2>
           {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No tab usage data available.</p>}
         </div>
       </div>
