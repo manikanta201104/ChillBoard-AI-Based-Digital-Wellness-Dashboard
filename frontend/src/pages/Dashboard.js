@@ -424,8 +424,8 @@ const Dashboard = () => {
     datasets: [{
       label: 'Screen Time (minutes)',
       data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
-      backgroundColor: 'rgba(54, 162, 235, 0.6)',
-      borderColor: 'rgba(54, 162, 235, 1)',
+      backgroundColor: 'rgba(34, 197, 94, 0.6)', // fill-green-300 variant
+      borderColor: 'rgba(59, 130, 246, 1)', // stroke-blue-400
       borderWidth: 1,
     }],
   };
@@ -435,8 +435,8 @@ const Dashboard = () => {
     datasets: [{
       label: 'Tab Usage (seconds)',
       data: [],
-      backgroundColor: ['rgba(255, 99, 132, 0.6)', 'rgba(54, 162, 235, 0.6)', 'rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)', 'rgba(255, 159, 64, 0.6)'],
-      borderColor: ['rgba(255, 99, 132, 1)', 'rgba(54, 162, 235, 1)', 'rgba(255, 206, 86, 1)', 'rgba(75, 192, 192, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)'],
+      backgroundColor: ['rgba(34, 197, 94, 0.6)', 'rgba(59, 130, 246, 0.6)', 'rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)', 'rgba(255, 159, 64, 0.6)'],
+      borderColor: ['rgba(34, 197, 94, 1)', 'rgba(59, 130, 246, 1)', 'rgba(255, 206, 86, 1)', 'rgba(75, 192, 192, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)'],
       borderWidth: 1,
     }],
   };
@@ -454,12 +454,12 @@ const Dashboard = () => {
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <h1 className="text-4xl font-bold text-center mb-8">ChillBoard Dashboard</h1>
+    <div className="min-h-screen bg-green-50 p-4 md:p-6">
+      <h1 className="text-4xl font-bold text-center mb-8 text-gray-700">ChillBoard Dashboard</h1>
       {error && <p className="text-red-500 text-center mb-4">{error}</p>}
       {!extensionInstalled && (
         <div className="text-center mb-8">
-          <p className="text-yellow-600 mb-2">ChillBoard extension not detected!</p>
+          <p className="text-yellow-600 mb-2 sm:text-sm">ChillBoard extension not detected!</p>
           <button onClick={handleInstallReminder} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600">Install Extension</button>
         </div>
       )}
@@ -470,33 +470,33 @@ const Dashboard = () => {
         <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Connect Spotify</button>
       </div>
       {leaderboardLoading ? (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
-          <p className="text-gray-600">Loading leaderboard...</p>
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
+          <p className="text-gray-700 sm:text-sm">Loading leaderboard...</p>
         </div>
       ) : leaderboard.length > 0 ? (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Top 3 Leaders</h2>
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
+          <h2 className="text-xl font-semibold text-gray-700 mb-2 sm:text-lg">Top 3 Leaders</h2>
           {leaderboard.map((entry, index) => (
-            <p key={index} className="text-gray-700 mb-1">
+            <p key={index} className="text-gray-700 mb-1 sm:text-sm">
               #{entry.rank} {entry.username}: {entry.reduction.toFixed(1)} hours
             </p>
           ))}
         </div>
       ) : (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto">
-          <p className="text-gray-600">No leaderboard data available. Join a challenge to see rankings!</p>
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
+          <p className="text-gray-700 sm:text-sm">No leaderboard data available. Join a challenge to see rankings!</p>
         </div>
       )}
       <div className="mb-8 flex justify-center">
-        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'}`} playsInline />
+        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'} border border-blue-200`} playsInline />
       </div>
       {webcamEnabled && (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md">
-          <p className="text-xl font-semibold text-gray-800">{detectedMood}</p>
+        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md border border-blue-200">
+          <p className="text-xl font-semibold text-gray-700">{detectedMood}</p>
           {detectedMood && !detectedMood.includes('No face') && !detectedMood.includes('Error') && (
             <div className="mt-4">
-              <label className="text-gray-600">Not correct? Select another mood: </label>
-              <select value={correctedMood} onChange={handleMoodCorrection} className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <label className="text-gray-700">Not correct? Select another mood: </label>
+              <select value={correctedMood} onChange={handleMoodCorrection} className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500 sm:text-sm">
                 <option value="">Select mood</option>
                 <option value="happy">Happy</option>
                 <option value="sad">Sad</option>
@@ -511,23 +511,23 @@ const Dashboard = () => {
       )}
       {latestRecommendation && (
         <div className="mb-8">
-          <h2 className="text-2xl font-semibold text-center mb-4">Recommendation</h2>
-          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto">
-            <p className="text-lg font-medium">{latestRecommendation.details.message || JSON.parse(latestRecommendation.details).name}</p>
-            <div className="mt-4 flex space-x-4">
+          <h2 className="text-2xl font-semibold text-center mb-4 text-gray-700">Recommendation</h2>
+          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto border border-blue-200">
+            <p className="text-lg font-medium text-gray-700">{latestRecommendation.details.message || JSON.parse(latestRecommendation.details).name}</p>
+            <div className="mt-4 flex space-x-4 justify-center">
               <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'}`}>Accept</button>
               <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'}`}>Decline</button>
             </div>
-            {actionStatus && <p className="mt-2 text-sm text-gray-600">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
+            {actionStatus && <p className="mt-2 text-sm text-gray-700">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
             {latestRecommendation.type === 'break' && !actionStatus && (
               <div className="mt-4">
                 {timer !== null ? (
                   <div>
-                    <p className="text-xl font-semibold">{formatTime(timer)}</p>
-                    <button onClick={resetTimer} className="mt-2 bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600">Reset Timer</button>
+                    <p className="text-xl font-semibold text-gray-700">{formatTime(timer)}</p>
+                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Reset Timer</button>
                   </div>
                 ) : (
-                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Start Timer</button>
+                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Start Timer</button>
                 )}
               </div>
             )}
@@ -535,7 +535,7 @@ const Dashboard = () => {
               <div className="mt-4">
                 {spotifyToken ? (
                   <div>
-                    <p className="text-md font-medium mb-2">Playing: {currentPlaylist.name || 'Loading...'}</p>
+                    <p className="text-md font-medium mb-2 text-gray-700">Playing: {currentPlaylist.name || 'Loading...'}</p>
                     <SpotifyPlayer
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
@@ -552,8 +552,8 @@ const Dashboard = () => {
                       }}
                     />
                     <div className="mt-4 flex space-x-4 justify-center">
-                      <button onClick={handleSavePlaylist} className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Save</button>
-                      <button onClick={handleSkipPlaylist} className="bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600">Skip</button>
+                      <button onClick={handleSavePlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Save</button>
+                      <button onClick={handleSkipPlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600">Skip</button>
                     </div>
                   </div>
                 ) : (
@@ -565,13 +565,13 @@ const Dashboard = () => {
         </div>
       )}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-2xl font-semibold mb-4">Daily Screen Time</h2>
-          {screenTimeData.length > 0 ? <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-500">No screen time data available.</p>}
+        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200">
+          <h2 className="text-2xl font-semibold mb-4 text-gray-700">Daily Screen Time</h2>
+          {screenTimeData.length > 0 ? <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No screen time data available.</p>}
         </div>
-        <div className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-2xl font-semibold mb-4">Tab Usage</h2>
-          {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-500">No tab usage data available.</p>}
+        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200">
+          <h2 className="text-2xl font-semibold mb-4 text-gray-700">Tab Usage</h2>
+          {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No tab usage data available.</p>}
         </div>
       </div>
     </div>
