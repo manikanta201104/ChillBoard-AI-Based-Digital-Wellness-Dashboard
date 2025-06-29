@@ -195,3 +195,14 @@ export const saveSettings=async(settingsData)=>{
     },
   });
 };
+
+export const sendContactMessage=async (contactData)=>{
+  const token=localStorage.getItem('jwt');
+  if(!token) throw new Error('No token found');
+  const response=await api.post('/contact',contactData,{
+  headers:{
+    Authorization:`Bearer ${token}`,
+  }
+  });
+  return response.data;
+}
