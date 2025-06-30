@@ -1,3 +1,4 @@
+
 document.addEventListener('DOMContentLoaded', () => {
   const loginContainer = document.getElementById('login-container');
   const statsContainer = document.getElementById('stats-container');
@@ -7,13 +8,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const openWebAppBtn = document.getElementById('open-webapp-btn');
   const totalTimeSpan = document.getElementById('total-time');
   const tabCountSpan = document.getElementById('tab-count');
-  const deviceIdSpan = document.getElementById('device-id');
-  const syncStatus = document.getElementById('sync-status');
   const emailInput = document.getElementById('email');
   const passwordInput = document.getElementById('password');
-
-  // Set device identifier
-  deviceIdSpan.textContent = navigator.userAgent.substring(0, 20) + '...';
 
   chrome.storage.local.get(['jwt'], (result) => {
     if (result.jwt) {
@@ -73,33 +69,15 @@ document.addEventListener('DOMContentLoaded', () => {
     loginContainer.style.display = 'none';
     statsContainer.style.display = 'block';
 
-    function updateStats() {
-      chrome.storage.local.get(['totalTime', 'tabUsage'], (result) => {
-        const totalTime = result.totalTime || 0;
-        const tabUsage = result.tabUsage || [];
-        const minutes = Math.floor(totalTime / 60);
-        const hours = Math.floor(minutes / 60);
-        const displayTime = hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+    chrome.storage.local.get(['totalTime', 'tabUsage'], (result) => {
+      const totalTime = result.totalTime || 0;
+      const tabUsage = result.tabUsage || [];
+      const minutes = Math.floor(totalTime / 60);
+      const hours = Math.floor(minutes / 60);
+      const displayTime = hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
 
-        totalTimeSpan.textContent = displayTime;
-        tabCountSpan.textContent = tabUsage.length;
-
-        // Check sync status
-        chrome.runtime.sendMessage({ action: 'checkSyncStatus' }, (response) => {
-          syncStatus.textContent = response?.status || 'Syncing...';
-        });
-      });
-    }
-
-    updateStats(); // Initial update
-    setInterval(updateStats, 10000); // Refresh every 10 seconds
-  }
-});
-
-// Listen for sync status updates from background.js
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'syncStatus') {
-    syncStatus.textContent = message.status;
-    sendResponse({ received: true });
+      totalTimeSpan.textContent = displayTime;
+      tabCountSpan.textContent = tabUsage.length;
+    });
   }
 });

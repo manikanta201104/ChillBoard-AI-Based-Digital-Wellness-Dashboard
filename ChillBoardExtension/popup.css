@@ -1,3 +1,4 @@
+
 body {
   width: 300px;
   padding: 10px;
@@ -16,10 +17,6 @@ h1 {
 #login-container,
 #stats-container {
   margin-top: 10px;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  background-color: #fff;
 }
 
 .input-group {
@@ -85,9 +82,4 @@ p {
   text-align: center;
   color: #333;
   margin: 5px 0;
-}
-
-#stats-container p:first-child {
-  font-weight: bold;
-  color: #2c3e50;
 }
