@@ -33,7 +33,7 @@ const screenTimeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Updated index to match the aggregation date format
-screenTimeSchema.index({ userId: 1, date: 1 }, { unique: true, partialFilterExpression: { date: { $exists: true } } });
+// Index to ensure one document per user per day
+screenTimeSchema.index({ userId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model('ScreenTime', screenTimeSchema);

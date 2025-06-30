@@ -1,4 +1,3 @@
-
 let isTracking = false;
 let totalTime = 0;
 let currentTabId = null;
@@ -154,86 +153,83 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+async function syncData() {
+  console.log('Starting data sync');
+  chrome.storage.local.get(['jwt', 'totalTime', 'tabUsage', 'offlineQueue'], async (result) => {
+    const jwt = result.jwt || null;
+    const totalTime = result.totalTime || 0;
+    let tabs = result.tabUsage || [];
+    const queue = result.offlineQueue || [];
 
-  async function syncData() {
-    console.log('Starting data sync');
-    chrome.storage.local.get(['jwt', 'totalTime', 'tabUsage', 'offlineQueue'], async (result) => {
-      const jwt = result.jwt || null;
-      const totalTime = result.totalTime || 0;
-      let tabs = result.tabUsage || [];
-      const queue = result.offlineQueue || [];
+    if (!jwt) {
+      console.log('No JWT found, saving to queue');
+      queue.push({ totalTime, tabs });
+      chrome.storage.local.set({ offlineQueue: queue });
+      notifyUser('Authentication required. Please log in via the web app.');
+      return;
+    }
 
-      if (!jwt) {
-        console.log('No JWT found, saving to queue');
-        queue.push({ totalTime, tabs });
-        chrome.storage.local.set({ offlineQueue: queue });
-        notifyUser('Authentication required. Please log in via the web app.');
-        return;
-      }
+    const totalTabTime = tabs.reduce((sum, tab) => sum + (tab.timeSpent || 0), 0);
+    const unaccountedTime = totalTime - totalTabTime;
+    if (unaccountedTime > 0 && tabs.length > 0) {
+      tabs[tabs.length - 1].timeSpent += unaccountedTime;
+      console.log(`Distributed ${unaccountedTime}s to last tab:`, tabs[tabs.length - 1]);
+    }
 
-      const totalTabTime = tabs.reduce((sum, tab) => sum + (tab.timeSpent || 0), 0);
-      const unaccountedTime = totalTime - totalTabTime;
-      if (unaccountedTime > 0 && tabs.length > 0) {
-        tabs[tabs.length - 1].timeSpent += unaccountedTime;
-        console.log(`Distributed ${unaccountedTime}s to last tab:`, tabs[tabs.length - 1]);
-      }
+    const dataToSync = [...queue, { totalTime, tabs }];
 
-      const dataToSync = [...queue, { totalTime, tabs }];
+    let isServerAvailable = false;
+    try {
+      const pingResponse = await fetch('http://localhost:5000/ping', { method: 'GET' });
+      isServerAvailable = pingResponse.ok;
+    } catch (err) {
+      console.log('Server is not available:', err.message);
+    }
 
-      // Check if server is reachable before attempting sync
-      let isServerAvailable = false;
-      try {
-        const pingResponse = await fetch('http://localhost:5000/ping', { method: 'GET' });
-        isServerAvailable = pingResponse.ok;
-      } catch (err) {
-        console.log('Server is not available:', err.message);
-      }
+    if (!navigator.onLine || !isServerAvailable) {
+      console.log('Offline or server down: saving to queue');
+      queue.push({ totalTime, tabs });
+      chrome.storage.local.set({ offlineQueue: queue });
+      notifyUser('Server is down or offline. Data will be synced later.');
+      return;
+    }
 
-      if (!navigator.onLine || !isServerAvailable) {
-        console.log('Offline or server down: saving to queue');
-        queue.push({ totalTime, tabs });
-        chrome.storage.local.set({ offlineQueue: queue });
-        notifyUser('Server is down or offline. Data will be synced later.');
-        return;
-      }
+    try {
+      for (const item of dataToSync) {
+        console.log('Sending sync request:', item);
+        const res = await fetch('http://localhost:5000/screen-time', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${jwt}`,
+          },
+          body: JSON.stringify(item),
+        });
 
-      try {
-        for (const item of dataToSync) {
-          console.log('Sending sync request:', item);
-          const res = await fetch('http://localhost:5000/screen-time', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${jwt}`,
-            },
-            body: JSON.stringify(item),
-          });
-
-          if (!res.ok) {
-            const text = await res.text();
-            console.error('Fetch failed:', res.status, text);
-            if (res.status === 401) {
-              notifyUser('Session expired. Please log in again.');
-              chrome.storage.local.remove('jwt'); // Clear invalid token
-              return;
-            }
-            throw new Error(`Sync failed: ${res.status} ${text}`);
+        if (!res.ok) {
+          const text = await res.text();
+          console.error('Fetch failed:', res.status, text);
+          if (res.status === 401) {
+            notifyUser('Session expired. Please log in again.');
+            chrome.storage.local.remove('jwt');
+            return;
           }
-
-          const data = await res.json();
-          console.log('Sync response:', data);
+          throw new Error(`Sync failed: ${res.status} ${text}`);
         }
 
-        console.log('✅ Data synced');
-        chrome.storage.local.set({ totalTime: 0, tabUsage: [], offlineQueue: [] });
-      } catch (err) {
-        console.error('Sync failed:', err.message);
-        chrome.storage.local.set({ offlineQueue: dataToSync });
-        notifyUser('Failed to sync data. Data will be synced when connection is restored.');
+        const data = await res.json();
+        console.log('Sync response:', data);
       }
-    });
-  }
 
+      console.log('✅ Data synced');
+      chrome.storage.local.set({ totalTime: 0, tabUsage: [], offlineQueue: [] });
+    } catch (err) {
+      console.error('Sync failed:', err.message);
+      chrome.storage.local.set({ offlineQueue: dataToSync });
+      notifyUser('Failed to sync data. Data will be synced when connection is restored.');
+    }
+  });
+}
 
 function notifyUser(message) {
   chrome.notifications.create({

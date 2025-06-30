@@ -1,4 +1,5 @@
-/*global chrome */
+/*global chrome*/
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
@@ -8,8 +9,8 @@ import SpotifyPlayer from 'react-spotify-web-playback';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
-const MODEL_URL = '/models'; // Local models
-const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/'; // CDN fallback
+const MODEL_URL = '/models';
+const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/';
 
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
@@ -128,7 +129,7 @@ const Dashboard = () => {
       );
       if (joined) {
         const data = await getLeaderboard(joined.challengeId);
-        setLeaderboard(data.slice(0, 3)); // Top 3 for snippet
+        setLeaderboard(data.slice(0, 3));
       } else {
         setLeaderboard([]);
       }
@@ -274,7 +275,7 @@ const Dashboard = () => {
         console.log('Video metadata loaded');
         videoRef.current.play().then(() => {
           console.log('Video playback started');
-          setError(''); // Clear any previous errors on success
+          setError('');
         }).catch(err => {
           console.error('Error playing video:', err);
           setError('Failed to play webcam video.');
@@ -420,7 +421,7 @@ const Dashboard = () => {
   };
 
   const barChartData = {
-    labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString()),
+    labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
     datasets: [{
       label: 'Screen Time (minutes)',
       data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
@@ -568,7 +569,31 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:flex-col sm:gap-4">
         <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
           <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Daily Screen Time</h2>
-          {screenTimeData.length > 0 ? <Bar data={barChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No screen time data available.</p>}
+          {screenTimeData.length > 0 ? (
+            <Bar
+              data={{
+                labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
+                datasets: [{
+                  label: 'Screen Time (minutes)',
+                  data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
+                  backgroundColor: 'rgba(34, 197, 94, 0.6)',
+                  borderColor: 'rgba(59, 130, 246, 1)',
+                  borderWidth: 1,
+                }],
+              }}
+              options={{
+                responsive: true,
+                plugins: {
+                  legend: { display: false },
+                  tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw} minutes` } },
+                },
+                scales: {
+                  x: { title: { display: true, text: 'Date' } },
+                  y: { title: { display: true, text: 'Minutes' }, beginAtZero: true },
+                },
+              }}
+            />
+          ) : <p className="text-gray-700 sm:text-sm">No screen time data available.</p>}
         </div>
         <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
           <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Tab Usage</h2>
