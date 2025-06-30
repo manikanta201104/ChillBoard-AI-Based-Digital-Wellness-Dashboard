@@ -9,7 +9,7 @@ const router = express.Router();
 router.post('/', authMiddleware, async (req, res) => {
   const { totalTime, tabs } = req.body;
   const userId = req.user.userId;
-  const date = new Date().toISOString().split('T')[0]; // Daily aggregation
+  const date = new Date(); // Use current date for consistency
 
   try {
     if (typeof totalTime !== 'number' || totalTime < 0) {
@@ -19,7 +19,8 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Tabs must be an array' });
     }
 
-    let screenTime = await ScreenTime.findOne({ userId, date: { $gte: new Date(date), $lt: new Date(date + 'T23:59:59Z') } });
+    const queryDate = new Date(date.toISOString().split('T')[0]); // Normalize to start of day
+    let screenTime = await ScreenTime.findOne({ userId, date: { $gte: queryDate, $lt: new Date(queryDate.getTime() + 86400000) } });
     if (screenTime) {
       screenTime.totalTime = (screenTime.totalTime || 0) + totalTime;
       screenTime.tabs = [...screenTime.tabs || [], ...tabs].reduce((acc, curr) => {
@@ -33,17 +34,17 @@ router.post('/', authMiddleware, async (req, res) => {
       const newScreenTime = new ScreenTime({
         screenTimeId: `st_${Date.now()}`,
         userId,
-        date: new Date(),
+        date: queryDate, // Store normalized date
         totalTime,
         tabs,
       });
       await newScreenTime.save();
     }
-    logger.info('Screen time saved/aggregated', { userId, totalTime, tabs });
+    logger.info('Screen time saved/aggregated', { userId, totalTime, tabs, date: queryDate });
     res.status(201).json({ message: 'Screen time saved/aggregated' });
   } catch (error) {
     logger.error('Error saving screen time:', error);
-    if (error.code === 11000) { // Duplicate key error
+    if (error.code === 11000) {
       res.status(409).json({ message: 'Duplicate entry detected, data aggregated' });
     } else {
       res.status(500).json({ message: 'Server error' });
@@ -54,9 +55,14 @@ router.post('/', authMiddleware, async (req, res) => {
 // GET /screen-time - Fetch screen time data
 router.get('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
+  const date = new Date().toISOString().split('T')[0]; // Current date
+  const queryDate = new Date(date);
 
   try {
-    const screenTimeData = await ScreenTime.find({ userId }).sort({ date: -1 });
+    const screenTimeData = await ScreenTime.find({
+      userId,
+      date: { $gte: queryDate, $lt: new Date(queryDate.getTime() + 86400000) }
+    }).sort({ date: -1 });
     res.status(200).json(screenTimeData);
   } catch (error) {
     logger.error('Error fetching screen time:', error);
