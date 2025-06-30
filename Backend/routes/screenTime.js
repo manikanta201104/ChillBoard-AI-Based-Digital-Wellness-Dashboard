@@ -1,15 +1,15 @@
-
 import express from 'express';
 import ScreenTime from '../models/screenTime.js';
 import { authMiddleware } from '../middleware/auth.js';
-import {logger}  from '../index.js';
+import { logger } from '../index.js';
 
 const router = express.Router();
 
-// POST /screen-time - Save screen time data
+// POST /screen-time - Save or aggregate screen time data
 router.post('/', authMiddleware, async (req, res) => {
   const { totalTime, tabs } = req.body;
   const userId = req.user.userId;
+  const date = new Date().toISOString().split('T')[0]; // Daily aggregation
 
   try {
     if (typeof totalTime !== 'number' || totalTime < 0) {
@@ -19,20 +19,35 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Tabs must be an array' });
     }
 
-    const newScreenTime = new ScreenTime({
-      screenTimeId: `st_${Date.now()}`,
-      userId,
-      date: new Date(),
-      totalTime,
-      tabs,
-    });
-
-    await newScreenTime.save();
-    logger.info('Screen time saved', { userId, totalTime, tabs });
-    res.status(201).json({ message: 'Screen time saved' });
+    let screenTime = await ScreenTime.findOne({ userId, date: { $gte: new Date(date), $lt: new Date(date + 'T23:59:59Z') } });
+    if (screenTime) {
+      screenTime.totalTime = (screenTime.totalTime || 0) + totalTime;
+      screenTime.tabs = [...screenTime.tabs || [], ...tabs].reduce((acc, curr) => {
+        const found = acc.find(item => item.url === curr.url);
+        if (found) found.timeSpent += curr.timeSpent || 0;
+        else acc.push(curr);
+        return acc;
+      }, []);
+      await screenTime.save();
+    } else {
+      const newScreenTime = new ScreenTime({
+        screenTimeId: `st_${Date.now()}`,
+        userId,
+        date: new Date(),
+        totalTime,
+        tabs,
+      });
+      await newScreenTime.save();
+    }
+    logger.info('Screen time saved/aggregated', { userId, totalTime, tabs });
+    res.status(201).json({ message: 'Screen time saved/aggregated' });
   } catch (error) {
     logger.error('Error saving screen time:', error);
-    res.status(500).json({ message: 'Server error' });
+    if (error.code === 11000) { // Duplicate key error
+      res.status(409).json({ message: 'Duplicate entry detected, data aggregated' });
+    } else {
+      res.status(500).json({ message: 'Server error' });
+    }
   }
 });
 

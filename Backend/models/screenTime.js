@@ -1,41 +1,39 @@
+import mongoose from 'mongoose';
 
-  import mongoose from 'mongoose';
+const tabsSchema = new mongoose.Schema(
+  {
+    url: String,
+    title: String,
+    timeSpent: Number,
+  },
+  { _id: false }
+);
 
-  const tabsSchema = new mongoose.Schema(
-    {
-      url: String,
-      title: String,
-      timeSpent: Number,
+const screenTimeSchema = new mongoose.Schema(
+  {
+    screenTimeId: {
+      type: String,
+      required: true,
+      unique: true,
     },
-    { _id: false }
-  );
-
-  const screenTimeSchema = new mongoose.Schema(
-    {
-      screenTimeId: {
-        type: String,
-        required: true,
-        unique: true, // This creates an index
-      },
-      userId: {
-        type: String,
-        required: true,
-      },
-      date: {
-        type: Date,
-        required: true,
-      },
-      totalTime: {
-        type: Number,
-        required: true,
-      },
-      tabs: [tabsSchema],
+    userId: {
+      type: String,
+      required: true,
     },
-    { timestamps: true }
-  );
+    date: {
+      type: Date,
+      required: true,
+    },
+    totalTime: {
+      type: Number,
+      required: true,
+    },
+    tabs: [tabsSchema],
+  },
+  { timestamps: true }
+);
 
-  // Removed duplicate index since unique: true already creates one
-  screenTimeSchema.index({ userId: 1, date: 1 });
+// Index for efficient querying and deduplication
+screenTimeSchema.index({ userId: 1, date: 1 }, { unique: true }); // Updated to enforce uniqueness
 
-  export default mongoose.model('ScreenTime', screenTimeSchema);
-  
+export default mongoose.model('ScreenTime', screenTimeSchema);
