@@ -1,4 +1,3 @@
-
 document.addEventListener('DOMContentLoaded', () => {
   const loginContainer = document.getElementById('login-container');
   const statsContainer = document.getElementById('stats-container');

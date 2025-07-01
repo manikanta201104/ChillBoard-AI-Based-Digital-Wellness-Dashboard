@@ -19,16 +19,20 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Tabs must be an array' });
     }
 
+    // Validate tabs data
+    const validTabs = tabs.filter(tab => {
+      if (!tab.url || typeof tab.timeSpent !== 'number' || tab.timeSpent < 0) {
+        logger.warn('Invalid tab data skipped:', tab);
+        return false;
+      }
+      return true;
+    });
+
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Update existing day's data
-      screenTime.totalTime = (screenTime.totalTime || 0) + totalTime;
-      screenTime.tabs = [...screenTime.tabs || [], ...tabs].reduce((acc, curr) => {
-        const found = acc.find(item => item.url === curr.url);
-        if (found) found.timeSpent += curr.timeSpent;
-        else acc.push(curr);
-        return acc;
-      }, []);
+      // Update existing day's data by replacing with new data
+      screenTime.totalTime = totalTime;
+      screenTime.tabs = validTabs;
     } else {
       // Create new document for the day
       screenTime = new ScreenTime({
@@ -36,12 +40,12 @@ router.post('/', authMiddleware, async (req, res) => {
         userId,
         date,
         totalTime,
-        tabs,
+        tabs: validTabs,
       });
     }
 
     await screenTime.save();
-    logger.info('Screen time saved or updated', { userId, date, totalTime, tabs });
+    logger.info('Screen time saved or updated', { userId, date, totalTime, tabs: validTabs });
     res.status(201).json({ message: 'Screen time saved or updated' });
   } catch (error) {
     logger.error('Error saving screen time:', error);

@@ -145,7 +145,8 @@ const Dashboard = () => {
     const fetchScreenTime = async () => {
       try {
         const data = await getScreenTime();
-        setScreenTimeData(data);
+        const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
+        setScreenTimeData(sortedData);
       } catch (err) {
         setError(err.message || 'Failed to fetch screen time data');
       }
@@ -420,6 +421,8 @@ const Dashboard = () => {
     }
   };
 
+  const today = new Date().toISOString().split('T')[0];
+
   const barChartData = {
     labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
     datasets: [{
@@ -431,21 +434,25 @@ const Dashboard = () => {
     }],
   };
 
+  const tabUsageMap = {};
+  screenTimeData
+    .filter(entry => new Date(entry.date).toISOString().split('T')[0] === today)
+    .forEach(entry => 
+      entry.tabs.forEach(tab => 
+        tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent
+      )
+    );
+
   const pieChartData = {
-    labels: [],
+    labels: Object.keys(tabUsageMap),
     datasets: [{
       label: 'Tab Usage (seconds)',
-      data: [],
+      data: Object.values(tabUsageMap),
       backgroundColor: ['rgba(34, 197, 94, 0.6)', 'rgba(59, 130, 246, 0.6)', 'rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)', 'rgba(255, 159, 64, 0.6)'],
       borderColor: ['rgba(34, 197, 94, 1)', 'rgba(59, 130, 246, 1)', 'rgba(255, 206, 86, 1)', 'rgba(75, 192, 192, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)'],
       borderWidth: 1,
     }],
   };
-
-  const tabUsageMap = {};
-  screenTimeData.forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
-  pieChartData.labels = Object.keys(tabUsageMap);
-  pieChartData.datasets[0].data = Object.values(tabUsageMap);
 
   const handleInstallReminder = () => {
     alert('Please install the ChillBoard Chrome extension to track your screen time!');
@@ -571,16 +578,7 @@ const Dashboard = () => {
           <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Daily Screen Time</h2>
           {screenTimeData.length > 0 ? (
             <Bar
-              data={{
-                labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
-                datasets: [{
-                  label: 'Screen Time (minutes)',
-                  data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
-                  backgroundColor: 'rgba(34, 197, 94, 0.6)',
-                  borderColor: 'rgba(59, 130, 246, 1)',
-                  borderWidth: 1,
-                }],
-              }}
+              data={barChartData}
               options={{
                 responsive: true,
                 plugins: {
