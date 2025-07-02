@@ -31,8 +31,13 @@ router.post('/', authMiddleware, async (req, res) => {
 
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      screenTime.totalTime = totalTime;
-      screenTime.tabs = validTabs;
+      // Aggregate totalTime and tabs
+      screenTime.totalTime += totalTime;
+      const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
+      validTabs.forEach((tab) => {
+        existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
+      });
+      screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
     } else {
       screenTime = new ScreenTime({
         screenTimeId: `st_${Date.now()}_${userId}`,
@@ -44,7 +49,7 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     await screenTime.save();
-    logger.info('Screen time saved or updated', { userId, date, totalTime, tabs: validTabs });
+    logger.info('Screen time saved or updated', { userId, date, totalTime: screenTime.totalTime, tabs: screenTime.tabs });
     res.status(201).json({ message: 'Screen time saved or updated' });
   } catch (error) {
     logger.error('Error saving screen time:', error);
