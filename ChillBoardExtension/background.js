@@ -137,6 +137,18 @@ chrome.runtime.onStartup.addListener(() => {
   initializeStorage();
 });
 
+// Handle system sleep/suspend
+chrome.runtime.onSuspend.addListener(() => {
+  console.log('System suspending, stopping tracking');
+  stopTracking();
+});
+
+// Handle system wake (optional, for robustness)
+chrome.runtime.onSuspendCanceled.addListener(() => {
+  console.log('System suspend canceled, checking focus');
+  checkFocus();
+});
+
 function checkFocus() {
   chrome.windows.getLastFocused({ populate: true }, (window) => {
     if (!window || window.state === 'minimized') {
