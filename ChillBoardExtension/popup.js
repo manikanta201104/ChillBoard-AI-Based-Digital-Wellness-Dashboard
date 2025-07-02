@@ -10,9 +10,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const emailInput = document.getElementById('email');
   const passwordInput = document.getElementById('password');
 
+  function updateStats() {
+    chrome.storage.local.get(['totalTime', 'tabUsage'], (result) => {
+      const totalTime = result.totalTime || 0;
+      const tabUsage = result.tabUsage || [];
+      const minutes = Math.floor(totalTime / 60);
+      const hours = Math.floor(minutes / 60);
+      const displayTime = hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
+
+      totalTimeSpan.textContent = displayTime;
+      tabCountSpan.textContent = tabUsage.length;
+    });
+  }
+
   chrome.storage.local.get(['jwt'], (result) => {
     if (result.jwt) {
       showStats();
+      updateStats();
+      setInterval(updateStats, 1000); // Update stats every second
     } else {
       showLogin();
     }
@@ -40,6 +55,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       chrome.storage.local.set({ jwt: data.token }, () => {
         showStats();
+        updateStats();
+        setInterval(updateStats, 1000);
       });
     } catch (error) {
       loginError.textContent = error.message;
@@ -67,16 +84,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function showStats() {
     loginContainer.style.display = 'none';
     statsContainer.style.display = 'block';
-
-    chrome.storage.local.get(['totalTime', 'tabUsage'], (result) => {
-      const totalTime = result.totalTime || 0;
-      const tabUsage = result.tabUsage || [];
-      const minutes = Math.floor(totalTime / 60);
-      const hours = Math.floor(minutes / 60);
-      const displayTime = hours > 0 ? `${hours}h ${minutes % 60}m` : `${minutes}m`;
-
-      totalTimeSpan.textContent = displayTime;
-      tabCountSpan.textContent = tabUsage.length;
-    });
+    updateStats();
   }
 });

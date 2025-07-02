@@ -18,20 +18,26 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'Email already exists' });
     }
 
+    const accessToken = jwt.sign({ userId: `user_${Date.now()}` }, config.jwtSecret, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId: `user_${Date.now()}` }, config.jwtSecret, { expiresIn: '7d' });
+
     const user = new User({
-      userId: `user_${Date.now()}`,
       username,
       email,
       password,
-      spotifyToken: null,
+      spotifyToken: {
+        accessToken,
+        refreshToken,
+        expiresIn: 3600,
+        obtainedAt: new Date(),
+      },
       preferences: {},
     });
 
     await user.save();
 
-    const token = jwt.sign({ userId: user._id }, config.jwtSecret, { expiresIn: '1h' });
     logger.info('User signed up successfully', { email });
-    res.status(201).json({ token });
+    res.status(201).json({ token: accessToken, refreshToken });
   } catch (error) {
     logger.error('Error during signup:', error);
     throw error;
@@ -54,45 +60,34 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const token = jwt.sign({ userId: user._id }, config.jwtSecret, { expiresIn: '1h' });
+    const accessToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '1h' });
+    const refreshToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '7d' });
+    user.spotifyToken = {
+      accessToken,
+      refreshToken,
+      expiresIn: 3600,
+      obtainedAt: new Date(),
+    };
+    await user.save();
+
     logger.info('User logged in successfully', { email });
-    res.status(200).json({ token });
+    res.status(200).json({ token: accessToken, refreshToken });
   } catch (error) {
     logger.error('Error during login:', error);
     throw error;
   }
 });
 
-/**
- * GET /auth/profile
- * Returns the authenticated user's profile.
- * Requires a valid JWT in the Authorization header.
- */
-router.get('/profile', async (req, res) => {
+// GET /auth/profile
+router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    // Extract token from Authorization header
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logger.warn('Unauthorized access: No or invalid token');
-      return res.status(401).json({ message: 'No token provided' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    let decoded;
-    try {
-      decoded = jwt.verify(token, config.jwtSecret);
-    } catch (err) {
-      logger.warn('Invalid token', { error: err.message });
-      return res.status(401).json({ message: 'Invalid token' });
-    }
-
-    const user = await User.findById(decoded.userId).select('username email spotifyToken');
+    const user = await User.findOne({ userId: req.user.userId }).select('username email spotifyToken');
     if (!user) {
-      logger.warn('User not found', { userId: decoded.userId });
+      logger.warn('User not found', { userId: req.user.userId });
       return res.status(404).json({ message: 'User not found' });
     }
 
-    logger.info('Profile fetched successfully', { userId: decoded.userId });
+    logger.info('Profile fetched successfully', { userId: req.user.userId });
     res.status(200).json({ username: user.username, email: user.email, spotifyToken: user.spotifyToken });
   } catch (error) {
     logger.error('Error fetching profile:', error);
@@ -100,26 +95,16 @@ router.get('/profile', async (req, res) => {
   }
 });
 
-// GET /user - Fetch user data including spotifyToken
-router.get('/user', async (req, res) => {
+// GET /user
+router.get('/user', authMiddleware, async (req, res) => {
   try {
-    // Extract token from Authorization header
-    const authHeader = req.headers['authorization'];
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      logger.warn('Unauthorized access: No or invalid token');
-      return res.status(401).json({ message: 'No token provided' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, config.jwtSecret);
-    const user = await User.findById(decoded.userId).select('spotifyToken preferences'); // Only return relevant fields
-
+    const user = await User.findOne({ userId: req.user.userId }).select('spotifyToken preferences');
     if (!user) {
-      logger.warn('User not found', { userId: decoded.userId });
+      logger.warn('User not found', { userId: req.user.userId });
       return res.status(404).json({ message: 'User not found' });
     }
 
-    logger.info('User data fetched successfully', { userId: decoded.userId });
+    logger.info('User data fetched successfully', { userId: req.user.userId });
     res.status(200).json(user);
   } catch (error) {
     logger.error('Error fetching user data:', error);
@@ -130,42 +115,35 @@ router.get('/user', async (req, res) => {
   }
 });
 
-
-/**
- * GET /auth/playlists
- * Returns the authenticated user's saved playlists.
- * Requires a valid JWT in the Authorization header.
- */
-router.get ('/playlists', authMiddleware, async (req, res) => {
+// GET /auth/playlists
+router.get('/playlists', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
-    const playlists = await Playlist.find ({userId, saved: true}).select (
-      'name mood spotifyPlaylistId'
-    );
-    logger.info ('Playlists fetched successfully', {userId});
-    res.status (200).json (playlists);
+    const playlists = await Playlist.find({ userId, saved: true }).select('name mood spotifyPlaylistId');
+    logger.info('Playlists fetched successfully', { userId });
+    res.status(200).json(playlists);
   } catch (error) {
-    logger.error ('Error fetching playlists:', error);
-    res.status (500).json ({message: 'Internal server error'});
+    logger.error('Error fetching playlists:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
-router.post('/settings',authMiddleware,async(req,res)=>{
-    try{
-        const userId=req.user.userId;
-        const {webcamEnabled,notifyEvery,showOnLeaderboard}=req.body;
+// POST /settings
+router.post('/settings', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { webcamEnabled, notifyEvery, showOnLeaderboard } = req.body;
 
-        const user=await User.findById(userId);
-        if(!user) return res.status(404).json({message:'User not found'});
+    const user = await User.findOne({ userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
 
-        user.preferences={webcamEnabled,notifyEvery,showOnLeaderboard};
-        await user.save();
+    user.preferences = { webcamEnabled, notifyEvery, showOnLeaderboard };
+    await user.save();
 
-        res.status(200).json({message:'Settings saved successfully'});
-        
-    }catch(error){
-        res.status(500).json({message:error.message});
-    }
-})
+    res.status(200).json({ message: 'Settings saved successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+});
 
 export default router;
