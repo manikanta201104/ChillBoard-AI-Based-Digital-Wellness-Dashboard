@@ -1,34 +1,28 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ChillBoard</title>
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <h1>ChillBoard</h1>
-
   <div id="login-container" style="display: none;">
-    <div class="input-group">
-      <label for="email">Email:</label>
-      <input type="email" id="email" placeholder="Enter your email" />
-    </div>
-    <div class="input-group">
-      <label for="password">Password:</label>
-      <input type="password" id="password" placeholder="Enter your password" />
-    </div>
+    <h1>ChillBoard Login</h1>
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="password" placeholder="Password">
     <button id="login-btn">Login</button>
-    <div id="login-error"></div>
+    <p id="login-error" style="color: red;"></p>
   </div>
-
   <div id="stats-container" style="display: none;">
+    <h1>ChillBoard</h1>
     <p>Today's Screen Time: <span id="total-time">0m</span></p>
     <p>Total Tabs Visited: <span id="tab-count">0</span></p>
-    <h3>Tab Usage:</h3>
     <ul id="tab-usage"></ul>
     <button id="logout-btn">Logout</button>
     <button id="open-webapp-btn">Open Web App</button>
+    <p id="loading-message" style="color: blue;"></p>
   </div>
-
   <script src="popup.js"></script>
 </body>
 </html>
