@@ -13,10 +13,21 @@ console.log('Service worker started');
 
 function initializeStorage() {
   chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue'], (result) => {
-    totalTime = result.totalTime || 0;
-    tabUsage = result.tabUsage || [];
-    lastSyncDate = result.lastSyncDate || new Date().toISOString().split('T')[0];
-    offlineQueue = result.offlineQueue || [];
+    const currentDate = new Date().toISOString().split('T')[0];
+    lastSyncDate = result.lastSyncDate || currentDate;
+    
+    // Only reset totalTime and tabUsage if date has changed
+    if (lastSyncDate !== currentDate) {
+      totalTime = 0;
+      tabUsage = [];
+      offlineQueue = result.offlineQueue || [];
+      console.log('Date changed, resetting totalTime and tabUsage', { lastSyncDate, currentDate });
+    } else {
+      totalTime = result.totalTime || 0;
+      tabUsage = result.tabUsage || [];
+      offlineQueue = result.offlineQueue || [];
+    }
+    
     console.log('Initialized storage:', { totalTime, tabUsage, lastSyncDate, offlineQueue });
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -46,12 +57,14 @@ chrome.runtime.onStartup.addListener(() => {
 function checkFocus() {
   chrome.windows.getLastFocused({ populate: true }, (window) => {
     if (!window || window.state === 'minimized' || !window.focused) {
+      console.log(`Window focus state: ${window?.focused ? 'focused' : 'not focused'}`);
       stopTracking();
       return;
     }
 
     const activeTab = window.tabs.find((tab) => tab.active);
     if (!activeTab || !activeTab.id || !activeTab.url || activeTab.url.startsWith('chrome://')) {
+      console.log(`Window focus state: ${window?.focused ? 'focused' : 'not focused'}, invalid tab`);
       stopTracking();
       return;
     }
@@ -64,7 +77,6 @@ function checkFocus() {
       currentTabUrl = new URL(activeTab.url).hostname;
       console.log('Active tab changed:', { currentTabId, url: currentTabUrl });
     } else if (!isTracking && currentTabId === activeTab.id && !currentTabUrl) {
-      // Re-fetch URL if resuming tracking for the same tab with null URL
       currentTabUrl = new URL(activeTab.url).hostname;
       console.log('Re-fetched URL for existing tab:', { currentTabId, url: currentTabUrl });
     }
@@ -103,7 +115,7 @@ function startActiveTabTimer() {
     if (isTracking && currentTabId !== null && tabStartTime !== null && currentTabUrl) {
       updateTabTime(currentTabUrl);
     }
-  }, 1000); // Update every second
+  }, 1000);
 }
 
 function updateTabTime(url) {
@@ -117,6 +129,7 @@ function updateTabTime(url) {
   if (timeSpent >= 1 && (!lastUpdateTime || currentTime - lastUpdateTime >= 1000)) {
     totalTime += timeSpent;
     console.log('Calculating time spent:', { currentTabId, url, timeSpent, totalTime });
+    console.log('Tab switch update for:', url);
 
     let existing = tabUsage.find((entry) => entry.url === url);
     if (existing) {
@@ -210,6 +223,8 @@ async function syncData() {
     let syncLastSyncDate = result.lastSyncDate || new Date().toISOString().split('T')[0];
     const currentDate = new Date().toISOString().split('T')[0];
 
+    console.log('Sync data state:', { jwt, syncTotalTime, syncTabUsageLength: syncTabUsage.length, offlineQueueLength: offlineQueue.length, syncLastSyncDate });
+
     if (!jwt) {
       console.log('No JWT, queuing data');
       offlineQueue.push({ totalTime: syncTotalTime, tabs: syncTabUsage, date: currentDate });
@@ -224,6 +239,7 @@ async function syncData() {
       syncTabUsage = [];
       syncLastSyncDate = currentDate;
       saveData();
+      console.log('Date changed, queued previous day and reset:', { syncTotalTime, syncTabUsage, syncLastSyncDate });
     }
 
     const dataToSync = [...offlineQueue, { totalTime: syncTotalTime, tabs: syncTabUsage, date: currentDate }].filter(
@@ -259,6 +275,7 @@ async function syncData() {
           chrome.storage.local.remove('jwt');
           offlineQueue.push(item);
           saveData();
+          console.log('JWT expired, queued data:', { item });
           return;
         }
         throw new Error(`Sync failed: ${response.status}`);
@@ -309,6 +326,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.warn('Failed to open web app:', chrome.runtime.lastError.message);
         }
       });
+    } else if (message.action === 'syncData') {
+      syncData();
     }
     sendResponse({ status: 'success' });
   } catch (error) {

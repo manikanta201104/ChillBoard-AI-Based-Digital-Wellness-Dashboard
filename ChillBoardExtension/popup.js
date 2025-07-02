@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const openWebAppBtn = document.getElementById('open-webapp-btn');
   const totalTimeSpan = document.getElementById('total-time');
   const tabCountSpan = document.getElementById('tab-count');
+  const tabUsageList = document.getElementById('tab-usage');
   const emailInput = document.getElementById('email');
   const passwordInput = document.getElementById('password');
 
@@ -20,14 +21,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
       totalTimeSpan.textContent = displayTime;
       tabCountSpan.textContent = tabUsage.length;
+
+      tabUsageList.innerHTML = '';
+      tabUsage.forEach((entry) => {
+        const li = document.createElement('li');
+        const entryMinutes = Math.floor(entry.timeSpent / 60);
+        const entrySeconds = entry.timeSpent % 60;
+        li.textContent = `${entry.url}: ${entryMinutes}m ${entrySeconds}s`;
+        tabUsageList.appendChild(li);
+      });
+      console.log('Updated stats:', { totalTime, tabUsageLength: tabUsage.length });
     });
   }
 
-  chrome.storage.local.get(['jwt'], (result) => {
+  chrome.storage.local.get(['jwt', 'totalTime', 'tabUsage'], (result) => {
     if (result.jwt) {
       showStats();
-      updateStats();
-      setInterval(updateStats, 1000); // Update stats every second
     } else {
       showLogin();
     }
@@ -54,9 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       chrome.storage.local.set({ jwt: data.token }, () => {
-        showStats();
-        updateStats();
-        setInterval(updateStats, 1000);
+        console.log('Login successful, checking storage state');
+        chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate'], (result) => {
+          console.log('Storage state after login:', result);
+          showStats();
+        });
       });
     } catch (error) {
       loginError.textContent = error.message;
@@ -65,7 +76,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   logoutBtn.addEventListener('click', () => {
     chrome.storage.local.remove('jwt', () => {
-      showLogin();
+      console.log('Logged out, checking storage state');
+      chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate'], (result) => {
+        console.log('Storage state after logout:', result);
+        showLogin();
+      });
     });
   });
 
@@ -85,5 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
     loginContainer.style.display = 'none';
     statsContainer.style.display = 'block';
     updateStats();
+    setInterval(updateStats, 1000);
+    chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate'], (result) => {
+      console.log('showStats storage state:', result);
+    });
   }
 });
