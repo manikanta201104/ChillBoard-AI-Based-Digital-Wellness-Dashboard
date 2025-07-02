@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       unique: true,
-      default: () => `user_${Date.now()}`, // Automatically generate userId
+      default: () => `user_${Date.now()}`,
     },
     username: {
       type: String,
