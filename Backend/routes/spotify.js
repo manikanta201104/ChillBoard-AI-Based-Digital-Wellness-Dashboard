@@ -131,7 +131,7 @@ router.get('/callback', async (req, res) => {
 router.get('/playlist', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
   const mood = req.query.mood || 'default';
-  const skip = req.query.skip === 'true'; // Check for skip parameter
+  const skip = req.query.skip === 'true';
 
   try {
     const user = await User.findOne({ userId });
@@ -154,7 +154,6 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
-    // Only check cache if not skipping
     let cachedPlaylist = null;
     if (!skip) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
