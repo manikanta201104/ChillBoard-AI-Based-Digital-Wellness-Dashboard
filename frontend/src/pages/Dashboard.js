@@ -184,7 +184,7 @@ const Dashboard = () => {
     fetchLeaderboard();
 
     if (window.chrome && chrome.runtime) {
-      chrome.runtime.sendMessage('extension_id_placeholder', { message: 'ping' }, (response) => {
+      chrome.runtime.sendMessage('cohlihkpndpeoklcbgcgaobmoojpdhpg', { message: 'ping' }, (response) => {
         if (chrome.runtime.lastError || !response) setExtensionInstalled(false);
       });
     } else {

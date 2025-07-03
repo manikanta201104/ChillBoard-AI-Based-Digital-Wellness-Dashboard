@@ -3,7 +3,6 @@ import mongoose from 'mongoose';
 const tabsSchema = new mongoose.Schema(
   {
     url: String,
-    title: String,
     timeSpent: Number,
   },
   { _id: false }
@@ -21,7 +20,7 @@ const screenTimeSchema = new mongoose.Schema(
       required: true,
     },
     date: {
-      type: Date,
+      type: String,
       required: true,
     },
     totalTime: {
@@ -33,7 +32,6 @@ const screenTimeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index to ensure one document per user per day
 screenTimeSchema.index({ userId: 1, date: 1 }, { unique: true });
 
 export default mongoose.model('ScreenTime', screenTimeSchema);

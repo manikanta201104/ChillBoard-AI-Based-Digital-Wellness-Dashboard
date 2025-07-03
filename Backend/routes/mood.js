@@ -18,16 +18,14 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid confidence value' });
     }
 
-    const newMood = new Mood({
-      moodId: `mood_${Date.now()}`,
-      userId,
-      mood,
-      confidence,
-      timestamp: new Date(),
-    });
+    // Update or create a single document for the user
+    const updatedMood = await Mood.findOneAndUpdate(
+      { userId },
+      { mood, confidence, timestamp: new Date() },
+      { upsert: true, new: true, runValidators: true }
+    );
 
-    await newMood.save();
-    logger.info('Mood saved', { userId, mood, confidence });
+    logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
 
     // Simulate TriggerLink for recommendations (Day 15)
     const triggerLink = {
@@ -36,9 +34,9 @@ router.post('/', authMiddleware, async (req, res) => {
     };
     logger.info('TriggerLink generated', triggerLink);
 
-    res.status(201).json({ message: 'Mood saved' });
+    res.status(200).json({ message: 'Mood updated', mood: updatedMood });
   } catch (error) {
-    logger.error('Error saving mood:', error);
+    logger.error('Error updating mood:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });
@@ -48,10 +46,7 @@ router.get('/latest', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    const latestMood = await Mood.findOne({ userId })
-      .sort({ timestamp: -1 })
-      .limit(1)
-      .exec();
+    const latestMood = await Mood.findOne({ userId }).exec();
 
     if (!latestMood) {
       return res.status(404).json({ message: 'No mood data found for this user' });
