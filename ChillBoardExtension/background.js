@@ -27,14 +27,20 @@ function initializeStorage() {
       tabUsage = [];
       lastSyncedTotalTime = 0;
       lastSyncedTabUsage = [];
-      offlineQueue = result.offlineQueue || [];
+      offlineQueue = (result.offlineQueue || []).map(item => ({
+        ...item,
+        date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
+      }));
       console.log('Date changed, resetting totalTime and tabUsage', { lastSyncDate, currentDate });
     } else {
       totalTime = result.totalTime || 0;
       tabUsage = result.tabUsage || [];
       lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
       lastSyncedTabUsage = result.lastSyncedTabUsage || [];
-      offlineQueue = result.offlineQueue || [];
+      offlineQueue = (result.offlineQueue || []).map(item => ({
+        ...item,
+        date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
+      }));
     }
 
     if (result.jwt) {
@@ -322,7 +328,10 @@ async function syncData() {
     let jwt = result.jwt || null;
     let syncTotalTime = result.totalTime || 0;
     let syncTabUsage = result.tabUsage || [];
-    let offlineQueue = result.offlineQueue || [];
+    let offlineQueue = (result.offlineQueue || []).map(item => ({
+      ...item,
+      date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
+    }));
     let syncLastSyncDate = result.lastSyncDate || new Date().toISOString().split('T')[0];
     let lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
     let lastSyncedTabUsage = result.lastSyncedTabUsage || [];
@@ -414,7 +423,7 @@ async function syncData() {
       console.warn('Service worker unavailable, retrying sync on next alarm');
       notifyUser('Service worker issue. Data will sync later.');
     } else {
-      offlineQueue.push({ totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: new Date().toISOString().split('T')[0] });
+      offlineQueue.push({ totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: currentDate });
       saveData();
       notifyUser('Failed to sync data. Will retry later.');
     }
