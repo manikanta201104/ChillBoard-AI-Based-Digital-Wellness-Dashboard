@@ -1,5 +1,3 @@
-/*global chrome*/
-
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
@@ -30,6 +28,7 @@ const Dashboard = () => {
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef(0);
@@ -388,6 +387,10 @@ const Dashboard = () => {
     }
   };
 
+  const handlePlay = () => {
+    setIsPlaying(true);
+  };
+
   const handleSkipPlaylist = async () => {
     let mood = correctedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase());
     if (!mood) {
@@ -413,9 +416,12 @@ const Dashboard = () => {
       return;
     }
     try {
-      const newPlaylist = await fetchNewPlaylist(mood);
+      const newPlaylist = await fetchNewPlaylist(mood, true);
+      console.log('New playlist fetched:', newPlaylist);
       setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
+      console.log('Current playlist updated to:', { id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
       setError('New playlist loaded!');
+      setIsPlaying(false);
     } catch (err) {
       setError('Failed to fetch new playlist');
     }
@@ -547,7 +553,7 @@ const Dashboard = () => {
                     <SpotifyPlayer
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
-                      play={true}
+                      play={isPlaying}
                       callback={state => {
                         if (state.isPlaying) console.log('Playing:', state.track.name);
                       }}
@@ -563,6 +569,9 @@ const Dashboard = () => {
                     <div className="mt-4 flex space-x-4 justify-center sm:flex-col sm:space-y-2 sm:space-x-0">
                       <button onClick={handleSavePlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Save</button>
                       <button onClick={handleSkipPlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Skip</button>
+                      {!isPlaying && (
+                        <button onClick={handlePlay} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Play</button>
+                      )}
                     </div>
                   </div>
                 ) : (

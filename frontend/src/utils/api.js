@@ -164,7 +164,7 @@ export const getLeaderboard = async challengeId => {
   return response.data;
 };
 
-export const unlinkSpotify=async()=>{
+export const unlinkSpotify = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.delete('/spotify/unlink', {
@@ -173,9 +173,9 @@ export const unlinkSpotify=async()=>{
     },
   });
   return response.data;
-}
+};
 
-export const getUserPlaylists=async()=>{
+export const getUserPlaylists = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.get('/auth/playlists', {
@@ -184,26 +184,25 @@ export const getUserPlaylists=async()=>{
     },
   });
   return response.data;
-}
+};
 
-export const saveSettings=async(settingsData)=>{
-  const token=localStorage.getItem('jwt');
-  if(!token) throw new Error('No token found');
-  const response=await api.post('/auth/settings',settingsData,{
-    headers:{
-      Authorization:`Bearer ${token}`,
+export const saveSettings = async (settingsData) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.post('/auth/settings', settingsData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
     },
   });
 };
 
-export const sendContactMessage=async (contactData)=>{
-  const token=localStorage.getItem('jwt');
-  if(!token) throw new Error('No token found');
-  const response=await api.post('/contact',contactData,{
-  headers:{
-    Authorization:`Bearer ${token}`,
-  }
+export const sendContactMessage = async (contactData) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.post('/contact', contactData, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
   });
   return response.data;
-}
-
+};

@@ -3,7 +3,7 @@ import SpotifyWebApi from 'spotify-web-api-node';
 import { logger } from '../index.js';
 import { authMiddleware } from '../middleware/auth.js';
 import User from '../models/user.js';
-import Playlist from '../models/playlist.js'; // New: Import Playlist model
+import Playlist from '../models/playlist.js';
 
 const router = express.Router();
 
@@ -11,15 +11,11 @@ const router = express.Router();
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  redirectUri: process.env.SPOTIFY_REDIRECT_URI
+  redirectUri: process.env.SPOTIFY_REDIRECT_URI,
 });
 
 // Scopes for Spotify permissions (updated to include streaming)
-const scopes = [
-  'user-read-private',
-  'streaming', 
-  'user-read-email' // Optional but recommended for SDK
-];
+const scopes = ['user-read-private', 'streaming', 'user-read-email'];
 
 // Mood to Spotify category mapping
 const moodCategoryMap = {
@@ -49,8 +45,8 @@ const refreshAccessToken = async (userId, refreshToken) => {
       throw new Error('Invalid response from Spotify token refresh');
     }
 
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
+    const updatedUser = await User.findOneAndUpdate(
+      { userId },
       {
         spotifyToken: {
           accessToken: access_token,
@@ -81,8 +77,8 @@ const refreshAccessToken = async (userId, refreshToken) => {
 
 // GET /spotify/login
 router.get('/login', authMiddleware, (req, res) => {
-  const userId = req.user.userId; // This is the _id from the JWT
-  const state = Buffer.from(userId).toString('base64'); // Encode _id as state
+  const userId = req.user.userId;
+  const state = Buffer.from(userId).toString('base64');
   const authorizeURL = spotifyApi.createAuthorizeURL(scopes, state);
   res.status(200).json({ authorizeURL });
 });
@@ -99,7 +95,7 @@ router.get('/callback', async (req, res) => {
   const userId = Buffer.from(state, 'base64').toString();
 
   try {
-    const user = await User.findById(userId);
+    const user = await User.findOne({ userId });
     if (!user) {
       logger.error('User not found during Spotify callback', { userId });
       return res.status(404).json({ message: 'User not found' });
@@ -108,8 +104,8 @@ router.get('/callback', async (req, res) => {
     const data = await spotifyApi.authorizationCodeGrant(code);
     const { access_token, refresh_token, expires_in } = data.body;
 
-    await User.findByIdAndUpdate(
-      userId,
+    await User.findOneAndUpdate(
+      { userId },
       {
         spotifyToken: {
           accessToken: access_token,
@@ -135,36 +131,43 @@ router.get('/callback', async (req, res) => {
 router.get('/playlist', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
   const mood = req.query.mood || 'default';
+  const skip = req.query.skip === 'true';
 
   try {
-    const user = await User.findById(userId);
-    if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) return res.status(400).json({ message: 'Spotify token not found' });
+    const user = await User.findOne({ userId });
+    if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) {
+      return res.status(400).json({ message: 'Spotify token not found' });
+    }
 
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
     const now = Date.now();
-    const tokenExpiry = new Date(obtainedAt).getTime() + (expiresIn * 1000);
+    const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
     let currentAccessToken = accessToken;
 
     if (now >= tokenExpiry) {
       logger.info('Token expired, refreshing', { userId, tokenExpiry });
       currentAccessToken = await refreshAccessToken(userId, refreshToken);
-      if (!currentAccessToken) return res.status(500).json({ message: 'Failed to refresh access token' });
+      if (!currentAccessToken) {
+        return res.status(500).json({ message: 'Failed to refresh access token' });
+      }
     } else {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
-    // Check for cached playlist (within 24 hours)
-    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const cachedPlaylist = await Playlist.findOne({
-      userId,
-      mood: moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default,
-      createdAt: { $gte: twentyFourHoursAgo },
-      saved: { $ne: true } // Avoid returning saved playlists unless needed
-    });
+    let cachedPlaylist = null;
+    if (!skip) {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+      cachedPlaylist = await Playlist.findOne({
+        userId,
+        mood: moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default,
+        createdAt: { $gte: twentyFourHoursAgo },
+        saved: { $ne: true }
+      });
 
-    if (cachedPlaylist) {
-      logger.info('Returning cached playlist', { userId, playlistId: cachedPlaylist.spotifyPlaylistId });
-      return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
+      if (cachedPlaylist) {
+        logger.info('Returning cached playlist', { userId, playlistId: cachedPlaylist.spotifyPlaylistId });
+        return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
+      }
     }
 
     spotifyApi.setAccessToken(currentAccessToken);
@@ -173,21 +176,40 @@ router.get('/playlist', authMiddleware, async (req, res) => {
 
     let playlists;
     try {
-      playlists = await spotifyApi.searchPlaylists(category, { limit: 1 });
-      logger.info('Playlists fetched from Spotify', { category, count: playlists.body.playlists.items.length });
+      playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
+      logger.info('Spotify API response', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
     } catch (searchErr) {
       logger.error('Spotify API error', { error: searchErr.message, stack: searchErr.stack, statusCode: searchErr.statusCode });
       throw searchErr;
     }
 
-    if (!playlists.body.playlists || playlists.body.playlists.items.length === 0) return res.status(404).json({ message: 'No playlists found for this mood' });
+    if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
+      return res.status(404).json({ message: 'No playlists found for this mood' });
+    }
 
-    const playlist = playlists.body.playlists.items[0];
+    const availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+    if (availablePlaylists.length === 0) {
+      logger.warn('No new playlists available, forcing new search');
+      playlists = await spotifyApi.searchPlaylists(`category:${category} calm`, { limit: 10 });
+      logger.info('Spotify API response (retry)', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
+      if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
+        return res.status(404).json({ message: 'No new playlists available after retry' });
+      }
+      availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+    }
+
+    const playlist = availablePlaylists[Math.floor(Math.random() * availablePlaylists.length)];
     const response = { spotifyPlaylistId: playlist.id, name: playlist.name, mood: mood.toLowerCase() };
 
     const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
     if (!existingPlaylist) {
-      const newPlaylist = new Playlist({ userId, spotifyPlaylistId: playlist.id, name: playlist.name, mood: category, saved: false });
+      const newPlaylist = new Playlist({
+        userId,
+        spotifyPlaylistId: playlist.id,
+        name: playlist.name,
+        mood: category,
+        saved: false,
+      });
       await newPlaylist.save();
       logger.info('New playlist saved', { userId, playlistId: playlist.id });
     }
@@ -199,48 +221,48 @@ router.get('/playlist', authMiddleware, async (req, res) => {
   }
 });
 
-router.patch('/playlist/:id',authMiddleware,async(req,res)=>{
-  const{id}=req.params;
-  const{saved}=req.body;
+router.patch('/playlist/:id', authMiddleware, async (req, res) => {
+  const { id } = req.params;
+  const { saved } = req.body;
 
-  try{
-    const playlist=await Playlist.findOneAndUpdate(
-      {spotifyPlaylistId:id,userId:req.user.userId},
-      {saved:saved===true},
-      {new:true, runValidators:true}
+  try {
+    const playlist = await Playlist.findOneAndUpdate(
+      { spotifyPlaylistId: id, userId: req.user.userId },
+      { saved: saved === true },
+      { new: true, runValidators: true }
     );
 
-    if(!playlist)
-      return res.status(404).json({message:'Playlist nor found'});
+    if (!playlist) {
+      return res.status(404).json({ message: 'Playlist not found' });
+    }
 
-    logger.info('Playlist updated',{spotifyPlaylistId:id,saved:playlist.saved});
+    logger.info('Playlist updated', { spotifyPlaylistId: id, saved: playlist.saved });
     res.status(200).json(playlist);
-  }catch(err){
-    logger.error('Error updating playlist',{error:err.message,stack:err.stack});
-    res.status(500).json({message:'Server error',error:err.message})
+  } catch (err) {
+    logger.error('Error updating playlist', { error: err.message, stack: err.stack });
+    res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
-router.delete('/unlink',authMiddleware,async(req,res)=>{
-  try{
-    const userId=req.user.userId;
-    if(!userId) return res.status(401).json({message:'Unauthorized'});
+router.delete('/unlink', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    if (!userId) return res.status(401).json({ message: 'Unauthorized' });
 
-    const user=await User.findById(userId);
-    if(!user) return res.status(400).json({message:'User not found'});
+    const user = await User.findOne({ userId });
+    if (!user) return res.status(400).json({ message: 'User not found' });
 
-    user.spotifyToken=null;
+    user.spotifyToken = null;
     await user.save();
 
-    await Playlist.deleteMany({userId,saved:true});
+    await Playlist.deleteMany({ userId, saved: true });
 
-    logger.info('Spotify account unlinked successfully',{userId});
-    res.status(200).json({message:'Spotify account unlinked successfully'});
-  }catch(error){
-    logger.error('Error unlinking Spotify account',{error:error.message,stack:error.stack});
-    res.status(500).json({message:error.message});
+    logger.info('Spotify account unlinked successfully', { userId });
+    res.status(200).json({ message: 'Spotify account unlinked successfully' });
+  } catch (error) {
+    logger.error('Error unlinking Spotify account', { error: error.message, stack: error.stack });
+    res.status(500).json({ message: error.message });
   }
-})
-
+});
 
 export default router;

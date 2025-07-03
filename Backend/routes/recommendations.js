@@ -5,7 +5,7 @@ import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
 import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
-import Playlist from '../models/playlist.js';
+import axios from 'axios';
 
 const router = express.Router();
 
@@ -40,57 +40,37 @@ router.post('/', authMiddleware, async (req, res) => {
 
       // Check most specific conditions first
       if (totalTime > 300 && mood === 'stressed') {
-        // Fetch a calm playlist for stressed mood
-        const playlist = await Playlist.findOne({ userId, mood: 'calm' })
-          .sort({ timestamp: -1 })
-          .limit(1)
-          .exec();
-        if (playlist) {
-          recommendation = {
-            type: 'music',
-            details: {
-              playlistId: playlist.spotifyPlaylistId,
-              name: playlist.name,
-            },
-            trigger: { screenTime: '>5h', mood: 'stressed' },
-            triggerSource: 'mood',
-            triggerNote: 'Music suggested for stress',
-          };
-        } else {
-          recommendation = {
-            type: 'break',
-            details: { action: 'stretch', duration: '5m' }, // Changed to avoid confusion with tired
-            trigger: { screenTime: '>5h', mood: 'stressed' },
-            triggerSource: 'mood',
-            triggerNote: 'Triggered by high screen time and stress, no playlist',
-          };
-        }
+        // Fetch a fresh calm playlist directly from Spotify
+        const playlistResponse = await axios.get(`http://localhost:5000/spotify/playlist?mood=calm`, {
+          headers: { Authorization: req.headers.authorization },
+        });
+        const { spotifyPlaylistId, name } = playlistResponse.data;
+        recommendation = {
+          type: 'music',
+          details: {
+            playlistId: spotifyPlaylistId,
+            name,
+          },
+          trigger: { screenTime: '>5h', mood: 'stressed' },
+          triggerSource: 'mood',
+          triggerNote: 'Music suggested for stress',
+        };
       } else if (totalTime > 180 && mood === 'tired') {
-        // Fetch a relax playlist for tired mood
-        const playlist = await Playlist.findOne({ userId, mood: 'tired' })
-          .sort({ timestamp: -1 })
-          .limit(1)
-          .exec();
-        if (playlist) {
-          recommendation = {
-            type: 'music',
-            details: {
-              playlistId: playlist.spotifyPlaylistId,
-              name: playlist.name,
-            },
-            trigger: { screenTime: '>3h', mood: 'tired' },
-            triggerSource: 'mood',
-            triggerNote: 'Music suggested for tiredness',
-          };
-        } else {
-          recommendation = {
-            type: 'break',
-            details: { action: 'rest', duration: '10m' },
-            trigger: { screenTime: '>3h', mood: 'tired' },
-            triggerSource: 'mood',
-            triggerNote: 'Triggered by moderate screen time and tiredness',
-          };
-        }
+        // Fetch a fresh relax playlist directly from Spotify
+        const playlistResponse = await axios.get(`http://localhost:5000/spotify/playlist?mood=tired`, {
+          headers: { Authorization: req.headers.authorization },
+        });
+        const { spotifyPlaylistId, name } = playlistResponse.data;
+        recommendation = {
+          type: 'music',
+          details: {
+            playlistId: spotifyPlaylistId,
+            name,
+          },
+          trigger: { screenTime: '>3h', mood: 'tired' },
+          triggerSource: 'mood',
+          triggerNote: 'Music suggested for tiredness',
+        };
       } else if (mood === 'happy') {
         recommendation = {
           type: 'message',
