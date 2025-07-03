@@ -49,7 +49,7 @@ const Dashboard = () => {
 
     try {
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.7 })) // Increased threshold for accuracy
         .withFaceLandmarks()
         .withFaceExpressions();
 
@@ -243,7 +243,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(detectEmotions, 500);
+      detectionIntervalRef.current = setInterval(detectEmotions, 1000); // Increased to 1000ms for performance
 
       return () => {
         if (detectionIntervalRef.current) {
@@ -268,7 +268,7 @@ const Dashboard = () => {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 } }); // Reduced resolution for performance
       streamRef.current = stream;
       console.log('Webcam stream obtained:', stream);
       videoRef.current.srcObject = stream;
