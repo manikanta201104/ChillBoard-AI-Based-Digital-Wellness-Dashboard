@@ -1,4 +1,3 @@
-// popup.js
 document.addEventListener('DOMContentLoaded', () => {
   const loginContainer = document.getElementById('login-container');
   const statsContainer = document.getElementById('stats-container');
@@ -16,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let isLoading = false;
   let statsUpdateInterval = null;
+  let isPopupClosing = false;
 
   // Simple JWT decode function
   function jwtDecode(token) {
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function fetchScreenTimeWithRetry(jwt, date, maxRetries = 2) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const success = await fetchScreenTime(jwt, date, 1); // Single attempt per retry
+        const success = await fetchScreenTime(jwt, date, 1);
         if (success) {
           await updateStatsDisplay();
           return true;
@@ -99,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function fetchScreenTime(jwt, date, retries = 1) {
-    if (isLoading) return false;
+    if (isLoading || isPopupClosing) return false;
     
     isLoading = true;
     if (totalTimeSpan) {
@@ -246,7 +246,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Function to combine tab usage by URL (same as service worker)
+  // Function to combine tab usage by URL
   function combineTabUsageByUrl(tabUsageArray) {
     if (!Array.isArray(tabUsageArray)) {
       return [];
@@ -273,15 +273,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   async function updateStatsDisplay() {
+    if (isPopupClosing) return;
+    
     try {
-      // First trigger sync to get latest data
-      await sendMessageToBackground({ action: 'syncData' });
+      // First trigger sync to get latest data with retry
+      const syncResponse = await sendMessageToBackgroundWithRetry({ action: 'syncData' });
+      if (!syncResponse) {
+        console.warn('Failed to sync data with background script');
+      }
       
       // Wait a bit for sync to complete
       await sleep(300);
       
       // Get current stats from background script
-      const response = await sendMessageToBackground({ action: 'getCurrentStats' });
+      const response = await sendMessageToBackgroundWithRetry({ action: 'getCurrentStats' });
       
       let totalTime = 0;
       let tabUsage = [];
@@ -292,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tabUsage = response.tabUsage || [];
         
         // Get tracking status
-        const statusResponse = await sendMessageToBackground({ action: 'getTrackingStatus' });
+        const statusResponse = await sendMessageToBackgroundWithRetry({ action: 'getTrackingStatus' });
         if (statusResponse && statusResponse.status === 'success') {
           trackingStatus = statusResponse;
         }
@@ -303,7 +308,7 @@ document.addEventListener('DOMContentLoaded', () => {
         tabUsage = localData.tabUsage || [];
       }
 
-      // Ensure tab usage is combined by URL (extra safety check)
+      // Ensure tab usage is combined by URL
       tabUsage = combineTabUsageByUrl(tabUsage);
 
       // Format and display total time
@@ -494,7 +499,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleOpenWebApp() {
-    sendMessageToBackground({ action: 'openWebApp' });
+    sendMessageToBackgroundWithRetry({ action: 'openWebApp' });
   }
 
   function showLogin() {
@@ -520,14 +525,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial stats update
     await updateStatsDisplay();
     
-    // Set up periodic updates every 3 seconds (reduced frequency)
+    // Set up periodic updates every 3 seconds
     if (statsUpdateInterval) {
       clearInterval(statsUpdateInterval);
     }
     
     statsUpdateInterval = setInterval(async () => {
       try {
-        await updateStatsDisplay();
+        if (!isPopupClosing) {
+          await updateStatsDisplay();
+        }
       } catch (error) {
         console.error('Error in periodic stats update:', error);
       }
@@ -566,10 +573,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Cleanup on popup close
+  // Detect popup closing
   window.addEventListener('beforeunload', () => {
+    isPopupClosing = true;
     if (statsUpdateInterval) {
       clearInterval(statsUpdateInterval);
+      statsUpdateInterval = null;
     }
   });
 
@@ -579,7 +588,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         chrome.storage.local.get(keys, (result) => {
           if (chrome.runtime.lastError) {
-            console.error('Error getting storage data:', chrome.runtime.lastError);
+            console.error('Error getting storage data:', chrome.runtime.lastError.message);
             resolve({});
           } else {
             resolve(result || {});
@@ -597,7 +606,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         chrome.storage.local.set(data, () => {
           if (chrome.runtime.lastError) {
-            console.error('Error setting storage data:', chrome.runtime.lastError);
+            console.error('Error setting storage data:', chrome.runtime.lastError.message);
           }
           resolve();
         });
@@ -613,7 +622,7 @@ document.addEventListener('DOMContentLoaded', () => {
       try {
         chrome.storage.local.remove(keys, () => {
           if (chrome.runtime.lastError) {
-            console.error('Error clearing storage data:', chrome.runtime.lastError);
+            console.error('Error clearing storage data:', chrome.runtime.lastError.message);
           }
           resolve();
         });
@@ -624,22 +633,48 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function sendMessageToBackground(message) {
-    return new Promise((resolve) => {
+  async function sendMessageToBackgroundWithRetry(message, maxRetries = 3, retryDelay = 1000) {
+    if (isPopupClosing) {
+      console.warn('Popup is closing, aborting message send');
+      return null;
+    }
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        chrome.runtime.sendMessage(message, (response) => {
-          if (chrome.runtime.lastError) {
-            console.error('Error sending message to background:', chrome.runtime.lastError);
-            resolve(null);
-          } else {
-            resolve(response);
-          }
+        const response = await new Promise((resolve, reject) => {
+          const timeoutId = setTimeout(() => {
+            reject(new Error('Message send timed out'));
+          }, 5000);
+
+          chrome.runtime.sendMessage(message, (response) => {
+            clearTimeout(timeoutId);
+            if (chrome.runtime.lastError) {
+              console.error(`Attempt ${attempt} - Error sending message to background:`, chrome.runtime.lastError.message);
+              reject(new Error(chrome.runtime.lastError.message));
+            } else {
+              resolve(response);
+            }
+          });
         });
+        
+        if (response !== null && response !== undefined) {
+          return response;
+        }
+        
+        if (attempt < maxRetries) {
+          console.log(`Retrying background message (attempt ${attempt + 1})...`);
+          await sleep(retryDelay * attempt); // Progressive backoff
+        }
       } catch (error) {
-        console.error('Message send error:', error);
-        resolve(null);
+        console.error(`Attempt ${attempt} - Message send error:`, error);
+        if (attempt === maxRetries) {
+          console.error('Max retries reached for background message');
+          return null;
+        }
+        await sleep(retryDelay * attempt);
       }
-    });
+    }
+    return null;
   }
 
   function sleep(ms) {

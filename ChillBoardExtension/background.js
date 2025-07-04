@@ -1,4 +1,3 @@
-// service-worker.js
 let isTracking = false;
 let totalTime = 0;
 let currentTabId = null;
@@ -113,7 +112,6 @@ function sleep(ms) {
 
 function notifyUser(message) {
   console.log('Notification:', message);
-  // You can implement actual notifications here if needed
   chrome.action.setBadgeText({ text: '!' });
   chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });
   setTimeout(() => {
@@ -265,7 +263,7 @@ async function fetchServerData(jwt, date, retries = 3) {
         lastSyncedTabUsage = [...combinedTabUsage];
         
         await saveAllData();
-        console.log('Updated local storage from server:', { totalTime, tabUsage: tabUsage.length });
+        console.log('Updated local local storage from server:', { totalTime, tabUsage: tabUsage.length });
       } else {
         console.log('No server data for today, preserving local data');
       }
@@ -757,6 +755,7 @@ async function syncData() {
 
 // Message handler for popup communication
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  // Ensure immediate response to keep message port open
   if (request.action === 'getScreenTime') {
     sendResponse({
       totalTime: totalTime,
@@ -765,12 +764,32 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       currentTabUrl: currentTabUrl
     });
   } else if (request.action === 'resetData') {
-    resetDailyData(new Date().toISOString().split('T')[0]);
-    sendResponse({ success: true });
-  } else if (request.action === 'syncNow') {
-    syncData();
+    resetDailyData(new Date().toISOString().split('T')[0]).then(() => {
+      sendResponse({ success: true });
+    });
+    return true; // Keep message port open for async response
+  } else if (request.action === 'syncData') {
+    syncData().then(() => {
+      sendResponse({ success: true });
+    });
+    return true; // Keep message port open for async response
+  } else if (request.action === 'getCurrentStats') {
+    sendResponse({
+      status: 'success',
+      totalTime: totalTime,
+      tabUsage: tabUsage
+    });
+  } else if (request.action === 'getTrackingStatus') {
+    sendResponse({
+      status: 'success',
+      isTracking: isTracking,
+      currentTabUrl: currentTabUrl
+    });
+  } else if (request.action === 'openWebApp') {
+    chrome.tabs.create({ url: 'http://localhost:5000' });
     sendResponse({ success: true });
   }
+  return false; // Close message port for synchronous responses
 });
 
 // Initialize on startup
