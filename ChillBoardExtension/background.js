@@ -14,7 +14,7 @@ let lastSyncedTabUsage = [];
 console.log('Service worker started');
 
 function initializeStorage() {
-  chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue', 'lastSyncedTotalTime', 'lastSyncedTabUsage', 'jwt'], async (result) => {
+  chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue', 'lastSyncedTotalTime', 'lastSyncedTabUsage', 'jwt', 'refreshToken'], async (result) => {
     if (chrome.runtime.lastError) {
       console.error('Error accessing chrome.storage.local:', chrome.runtime.lastError);
       return;
@@ -128,7 +128,7 @@ async function refreshJwt() {
   } catch (error) {
     console.error('Error refreshing JWT:', error.message);
     notifyUser('Session expired. Please log in again.');
-    chrome.storage.local.remove('jwt');
+    chrome.storage.local.remove(['jwt', 'refreshToken']);
     return null;
   }
 }
@@ -149,7 +149,7 @@ chrome.runtime.onSuspend.addListener(() => {
   stopTracking();
 });
 
-// Handle system wake (optional, for robustness)
+// Handle system wake
 chrome.runtime.onSuspendCanceled.addListener(() => {
   console.log('System suspend canceled, checking focus');
   checkFocus();
@@ -185,7 +185,7 @@ function checkFocus() {
     if (!isTracking) {
       isTracking = true;
       tabStartTime = Date.now();
-      lastUpdateTime = null;
+      lastUpdateTime = Date.now();
       console.log('Tracking status: Started');
       console.log('Started tracking for tab:', { currentTabId, url: currentTabUrl });
       startActiveTabTimer();
@@ -227,20 +227,16 @@ function updateTabTime(url) {
 
   const currentTime = Date.now();
   const timeSpent = Math.floor((currentTime - tabStartTime) / 1000);
-  if (timeSpent >= 1 && (!lastUpdateTime || currentTime - lastUpdateTime >= 1000)) {
+  if (timeSpent >= 1) {
     totalTime += timeSpent;
-    console.log('Calculating time spent:', { currentTabId, url, timeSpent, totalTime });
-    console.log('Tab switch update for:', url);
-
     let existing = tabUsage.find((entry) => entry.url === url);
     if (existing) {
       existing.timeSpent = (existing.timeSpent || 0) + timeSpent;
     } else {
       tabUsage.push({ url, timeSpent });
     }
-    console.log('Updated tab usage:', { url, timeSpent, tabUsage });
+    console.log('Updated tab usage:', { url, timeSpent, totalTime, tabUsage });
     saveData();
-
     tabStartTime = currentTime;
     lastUpdateTime = currentTime;
   }
@@ -333,46 +329,52 @@ async function syncData() {
       date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
     }));
     let syncLastSyncDate = result.lastSyncDate || new Date().toISOString().split('T')[0];
-    let lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
-    let lastSyncedTabUsage = result.lastSyncedTabUsage || [];
     const currentDate = new Date().toISOString().split('T')[0];
 
-    console.log('Sync data state:', { jwt, syncTotalTime, syncTabUsageLength: syncTabUsage.length, lastSyncedTotalTime, lastSyncedTabUsageLength: lastSyncedTabUsage.length, offlineQueueLength: offlineQueue.length, syncLastSyncDate });
+    console.log('Sync data state:', { jwt, syncTotalTime, syncTabUsage, lastSyncedTotalTime, lastSyncedTabUsage, offlineQueue, syncLastSyncDate });
 
     if (!jwt) {
       console.log('No JWT, queuing data');
-      offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: currentDate });
-      saveData();
+      if (syncTotalTime > lastSyncedTotalTime || syncTabUsage.length > 0) {
+        offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: currentDate });
+        saveData();
+      }
       notifyUser('Please log in to sync data.');
       return;
     }
 
     if (currentDate !== syncLastSyncDate) {
-      offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: syncLastSyncDate });
-      syncTotalTime = 0;
-      syncTabUsage = [];
-      lastSyncedTotalTime = 0;
-      lastSyncedTabUsage = [];
-      syncLastSyncDate = currentDate;
+      if (syncTotalTime > lastSyncedTotalTime || syncTabUsage.length > 0) {
+        offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: syncLastSyncDate });
+      }
+      lastSyncDate = currentDate;
       saveData();
-      console.log('Date changed, queued previous day and reset:', { syncTotalTime, syncTabUsage, lastSyncedTotalTime, lastSyncedTabUsage, syncLastSyncDate });
+      console.log('Date changed, queued previous day:', { syncTotalTime, syncTabUsage, lastSyncDate });
     }
 
     const deltaTotalTime = syncTotalTime - lastSyncedTotalTime;
     const deltaTabUsage = calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage);
-    const dataToSync = [...offlineQueue, { totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate }].filter(
-      (item) => item.date === currentDate
+    const dataToSync = [...offlineQueue, ...(deltaTotalTime > 0 || deltaTabUsage.length > 0 ? [{ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate }] : [])].filter(
+      (item) => item.date === currentDate && (item.totalTime > 0 || item.tabs.length > 0)
     );
 
     if (!navigator.onLine) {
       console.log('Offline, queuing data');
-      offlineQueue.push({ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate });
-      saveData();
+      if (deltaTotalTime > 0 || deltaTabUsage.length > 0) {
+        offlineQueue.push({ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate });
+        saveData();
+      }
       notifyUser('Offline. Data will sync when online.');
       return;
     }
 
+    if (dataToSync.length === 0) {
+      console.log('No data to sync', { deltaTotalTime, deltaTabUsage });
+      return;
+    }
+
     for (const item of dataToSync) {
+      console.log('Sending sync data:', item);
       const response = await fetch('http://localhost:5000/screen-time', {
         method: 'POST',
         headers: {
@@ -396,7 +398,7 @@ async function syncData() {
             return await syncData();
           }
           notifyUser('Session expired. Please log in again.');
-          chrome.storage.local.remove('jwt');
+          chrome.storage.local.remove(['jwt', 'refreshToken']);
           offlineQueue.push(item);
           saveData();
           console.log('JWT expired, queued data:', { item });
@@ -412,10 +414,16 @@ async function syncData() {
       if (!success) {
         console.log('Preserving local data due to fetch failure');
       }
-      saveData();
     }
 
     offlineQueue = offlineQueue.filter((item) => item.date !== currentDate);
+    if (currentDate !== syncLastSyncDate) {
+      syncTotalTime = 0;
+      syncTabUsage = [];
+      lastSyncedTotalTime = 0;
+      lastSyncedTabUsage = [];
+      syncLastSyncDate = currentDate;
+    }
     saveData();
   } catch (error) {
     console.error('Sync error:', error.message);
@@ -423,8 +431,10 @@ async function syncData() {
       console.warn('Service worker unavailable, retrying sync on next alarm');
       notifyUser('Service worker issue. Data will sync later.');
     } else {
-      offlineQueue.push({ totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: currentDate });
-      saveData();
+      if (totalTime > lastSyncedTotalTime || tabUsage.length > 0) {
+        offlineQueue.push({ totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: currentDate });
+        saveData();
+      }
       notifyUser('Failed to sync data. Will retry later.');
     }
   }
@@ -483,7 +493,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.warn('Message handling error:', error.message);
     sendResponse({ status: 'error', message: error.message });
   }
-  return true; // Keep message channel open for async response
+  return true;
 });
 
 // Helper function to decode JWT

@@ -2,6 +2,9 @@ import express from 'express';
 import ScreenTime from '../models/screenTime.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../index.js';
+import User from '../models/user.js';
+import jwt from 'jsonwebtoken';
+import { config } from '../config/env.js';
 
 const router = express.Router();
 
@@ -97,11 +100,12 @@ router.get('/', authMiddleware, async (req, res) => {
   }
 });
 
-// POST /refresh-token - Refresh JWT
+// POST /screen-time/refresh-token
 router.post('/refresh-token', async (req, res) => {
   const { refreshToken } = req.body;
   try {
     if (!refreshToken) {
+      logger.warn('Refresh token missing');
       return res.status(400).json({ message: 'Refresh token is required' });
     }
 
@@ -115,13 +119,14 @@ router.post('/refresh-token', async (req, res) => {
 
     const user = await User.findOne({ 'spotifyToken.refreshToken': refreshToken });
     if (!user) {
-      logger.warn('User not found for refresh', { refreshToken });
+      logger.warn('User not found for refresh token', { refreshToken });
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const newToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '1h' });
+    const newToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '24h' });
     user.spotifyToken.accessToken = newToken;
     user.spotifyToken.obtainedAt = new Date();
+    user.spotifyToken.expiresIn = 86400; // 24 hours in seconds
     await user.save();
 
     logger.info('Token refreshed successfully', { userId: user.userId });

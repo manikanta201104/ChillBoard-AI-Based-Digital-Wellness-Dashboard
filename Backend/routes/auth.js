@@ -18,17 +18,19 @@ router.post('/signup', async (req, res) => {
       return res.status(400).json({ message: 'Email already exists' });
     }
 
-    const accessToken = jwt.sign({ userId: `user_${Date.now()}` }, config.jwtSecret, { expiresIn: '1h' });
-    const refreshToken = jwt.sign({ userId: `user_${Date.now()}` }, config.jwtSecret, { expiresIn: '7d' });
+    const userId = `user_${Date.now()}`;
+    const accessToken = jwt.sign({ userId }, config.jwtSecret, { expiresIn: '24h' });
+    const refreshToken = jwt.sign({ userId }, config.jwtSecret, { expiresIn: '7d' });
 
     const user = new User({
+      userId,
       username,
       email,
       password,
       spotifyToken: {
         accessToken,
         refreshToken,
-        expiresIn: 3600,
+        expiresIn: 86400, // 24 hours in seconds
         obtainedAt: new Date(),
       },
       preferences: {},
@@ -40,7 +42,7 @@ router.post('/signup', async (req, res) => {
     res.status(201).json({ token: accessToken, refreshToken });
   } catch (error) {
     logger.error('Error during signup:', error);
-    throw error;
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -60,12 +62,12 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    const accessToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '1h' });
+    const accessToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '24h' });
     const refreshToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '7d' });
     user.spotifyToken = {
       accessToken,
       refreshToken,
-      expiresIn: 3600,
+      expiresIn: 86400, // 24 hours in seconds
       obtainedAt: new Date(),
     };
     await user.save();
@@ -74,7 +76,7 @@ router.post('/login', async (req, res) => {
     res.status(200).json({ token: accessToken, refreshToken });
   } catch (error) {
     logger.error('Error during login:', error);
-    throw error;
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 
@@ -111,7 +113,7 @@ router.get('/user', authMiddleware, async (req, res) => {
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({ message: 'Invalid token' });
     }
-    throw error;
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

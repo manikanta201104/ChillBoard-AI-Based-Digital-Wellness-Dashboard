@@ -65,26 +65,36 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function refreshJwt() {
     try {
-      const result = await new Promise((resolve) => chrome.storage.local.get(['refreshToken'], resolve));
-      const refreshToken = result.refreshToken;
+      const result = await new Promise((resolve) => chrome.storage.local.get(['jwt'], resolve));
+      const jwt = result.jwt;
+      if (!jwt) throw new Error('No JWT available');
+
+      // Fetch refreshToken from /auth/profile
+      const profileResponse = await fetch('http://localhost:5000/auth/profile', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${jwt}` },
+      });
+      if (!profileResponse.ok) throw new Error(`Profile fetch failed: ${profileResponse.status}`);
+      const profileData = await profileResponse.json();
+      const refreshToken = profileData.spotifyToken.refreshToken;
       if (!refreshToken) throw new Error('No refresh token available');
-      
+
       const response = await fetch('http://localhost:5000/screen-time/refresh-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
       });
       if (!response.ok) throw new Error(`Refresh token failed: ${response.status}`);
-      
+
       const data = await response.json();
-      chrome.storage.local.set({ jwt: data.token }, () => {
+      chrome.storage.local.set({ jwt: data.token, refreshToken }, () => {
         console.log('JWT refreshed successfully');
       });
       return data.token;
     } catch (error) {
       console.error('Error refreshing JWT:', error.message);
       loginError.textContent = 'Session expired. Please log in again.';
-      chrome.storage.local.remove('jwt');
+      chrome.storage.local.remove(['jwt', 'refreshToken']);
       showLogin();
       return null;
     }
@@ -92,6 +102,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function updateStats() {
     try {
+      // Trigger sync before updating stats
+      await new Promise((resolve) => {
+        chrome.runtime.sendMessage({ action: 'syncData' }, (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('Error triggering sync:', chrome.runtime.lastError);
+          }
+          resolve();
+        });
+      });
+
       const result = await new Promise((resolve) => {
         chrome.runtime.sendMessage({ action: 'getCurrentStats' }, (response) => {
           if (chrome.runtime.lastError) {
@@ -129,7 +149,7 @@ document.addEventListener('DOMContentLoaded', () => {
         li.textContent = `${entry.url}: ${entryMinutes}m ${entrySeconds}s`;
         tabUsageList.appendChild(li);
       });
-      console.log('Updated stats:', { totalTime, tabUsageLength: tabUsage.length });
+      console.log('Updated stats:', { totalTime, tabUsage });
       statsContainer.style.display = 'block';
       loginContainer.style.display = 'none';
     } catch (error) {
@@ -183,7 +203,7 @@ document.addEventListener('DOMContentLoaded', () => {
         throw new Error(data.message || 'Login failed');
       }
 
-      chrome.storage.local.set({ jwt: data.token, refreshToken: data.refreshToken || '' }, async () => {
+      chrome.storage.local.set({ jwt: data.token, refreshToken: data.refreshToken }, async () => {
         console.log('Login successful, checking storage state');
         await fetchScreenTime(data.token, new Date().toISOString().split('T')[0]);
         chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate'], (result) => {

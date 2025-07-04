@@ -1,3 +1,5 @@
+/*global chrome*/
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
@@ -48,7 +50,7 @@ const Dashboard = () => {
 
     try {
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.7 })) // Increased threshold for accuracy
+        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
         .withFaceLandmarks()
         .withFaceExpressions();
 
@@ -174,6 +176,8 @@ const Dashboard = () => {
       } catch (err) {
         setError(err.message || 'Failed to fetch user data');
         setSpotifyToken('');
+        // Attempt to re-authenticate if token is missing or invalid
+        handleSpotifyConnect();
       }
     };
 
@@ -242,7 +246,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(detectEmotions, 1000); // Increased to 1000ms for performance
+      detectionIntervalRef.current = setInterval(detectEmotions, 500);
 
       return () => {
         if (detectionIntervalRef.current) {
@@ -267,7 +271,7 @@ const Dashboard = () => {
     }
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 320, height: 240 } }); // Reduced resolution for performance
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
       streamRef.current = stream;
       console.log('Webcam stream obtained:', stream);
       videoRef.current.srcObject = stream;
@@ -423,7 +427,8 @@ const Dashboard = () => {
       setError('New playlist loaded!');
       setIsPlaying(false);
     } catch (err) {
-      setError('Failed to fetch new playlist');
+      setError(`Failed to fetch new playlist: ${err.message}. Attempting re-authentication...`);
+      await handleSpotifyConnect(); // Trigger re-auth if fetch fails
     }
   };
 
@@ -556,6 +561,11 @@ const Dashboard = () => {
                       play={isPlaying}
                       callback={state => {
                         if (state.isPlaying) console.log('Playing:', state.track.name);
+                        if (state.error) {
+                          console.error('Playback error:', state.error);
+                          setError(`Playback failed: ${state.error.message}. Re-authenticating...`);
+                          handleSpotifyConnect();
+                        }
                       }}
                       styles={{
                         bgColor: '#e5e7eb',
