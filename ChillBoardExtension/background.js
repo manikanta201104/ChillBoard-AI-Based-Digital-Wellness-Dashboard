@@ -1,3 +1,4 @@
+// service-worker.js
 let isTracking = false;
 let totalTime = 0;
 let currentTabId = null;
@@ -13,26 +14,134 @@ let lastSyncedTabUsage = [];
 
 console.log('Service worker started');
 
+// Utility functions
+function jwtDecode(token) {
+  try {
+    const base64Url = token.split('.')[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
+      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+    }).join(''));
+    return JSON.parse(jsonPayload);
+  } catch (error) {
+    console.error('JWT decode error:', error);
+    return null;
+  }
+}
+
+function extractHostname(url) {
+  try {
+    if (!url || typeof url !== 'string') return 'unknown';
+    
+    // Handle special cases
+    if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) {
+      return 'chrome';
+    }
+    
+    const urlObj = new URL(url);
+    return urlObj.hostname;
+  } catch (error) {
+    console.error('Error extracting hostname from:', url, error);
+    return 'unknown';
+  }
+}
+
+function getStorageData(keys) {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(keys, (result) => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage get error:', chrome.runtime.lastError);
+        resolve({});
+      } else {
+        resolve(result);
+      }
+    });
+  });
+}
+
+function setStorageData(data) {
+  return new Promise((resolve) => {
+    chrome.storage.local.set(data, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage set error:', chrome.runtime.lastError);
+      }
+      resolve();
+    });
+  });
+}
+
+function clearStorageData(keys) {
+  return new Promise((resolve) => {
+    chrome.storage.local.remove(keys, () => {
+      if (chrome.runtime.lastError) {
+        console.error('Storage clear error:', chrome.runtime.lastError);
+      }
+      resolve();
+    });
+  });
+}
+
+function calculateTabUsageDelta(currentTabUsage, lastSyncedTabUsage) {
+  const deltaMap = new Map();
+  
+  // Add current usage
+  currentTabUsage.forEach(tab => {
+    deltaMap.set(tab.url, {
+      tabId: tab.tabId,
+      url: tab.url,
+      timeSpent: tab.timeSpent
+    });
+  });
+  
+  // Subtract last synced usage
+  lastSyncedTabUsage.forEach(tab => {
+    if (deltaMap.has(tab.url)) {
+      const current = deltaMap.get(tab.url);
+      current.timeSpent -= tab.timeSpent;
+      if (current.timeSpent <= 0) {
+        deltaMap.delete(tab.url);
+      }
+    }
+  });
+  
+  return Array.from(deltaMap.values()).filter(tab => tab.timeSpent > 0);
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function notifyUser(message) {
+  console.log('Notification:', message);
+  // You can implement actual notifications here if needed
+  chrome.action.setBadgeText({ text: '!' });
+  chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });
+  setTimeout(() => {
+    chrome.action.setBadgeText({ text: '' });
+  }, 5000);
+}
+
+// Initialize storage and start tracking
 function initializeStorage() {
-  chrome.storage.local.get(['totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue', 'lastSyncedTotalTime', 'lastSyncedTabUsage', 'jwt'], async (result) => {
+  chrome.storage.local.get([
+    'totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue', 
+    'lastSyncedTotalTime', 'lastSyncedTabUsage', 'jwt', 'refreshToken',
+    'currentTabId', 'currentTabUrl', 'tabStartTime', 'isTracking'
+  ], async (result) => {
     if (chrome.runtime.lastError) {
       console.error('Error accessing chrome.storage.local:', chrome.runtime.lastError);
       return;
     }
+    
     const currentDate = new Date().toISOString().split('T')[0];
     lastSyncDate = result.lastSyncDate || currentDate;
 
+    // Check if it's a new day (midnight reset)
     if (lastSyncDate !== currentDate) {
-      totalTime = 0;
-      tabUsage = [];
-      lastSyncedTotalTime = 0;
-      lastSyncedTabUsage = [];
-      offlineQueue = (result.offlineQueue || []).map(item => ({
-        ...item,
-        date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
-      }));
-      console.log('Date changed, resetting totalTime and tabUsage', { lastSyncDate, currentDate });
+      console.log('New day detected, resetting data');
+      await resetDailyData(currentDate);
     } else {
+      // Restore existing data
       totalTime = result.totalTime || 0;
       tabUsage = result.tabUsage || [];
       lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
@@ -41,26 +150,81 @@ function initializeStorage() {
         ...item,
         date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
       }));
+      
+      // Restore tracking state after sleep/wake
+      if (result.isTracking && result.currentTabId && result.currentTabUrl) {
+        currentTabId = result.currentTabId;
+        currentTabUrl = result.currentTabUrl;
+        tabStartTime = Date.now(); // Reset start time to current time
+        console.log('Restored tracking state after wake:', { currentTabId, currentTabUrl, totalTime });
+      }
     }
 
+    // Fetch server data if authenticated
     if (result.jwt) {
       await fetchServerData(result.jwt, currentDate);
     }
 
-    console.log('Initialized storage:', { totalTime, tabUsage, lastSyncDate, lastSyncedTotalTime, lastSyncedTabUsage, offlineQueue });
-
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0 && tabs[0].id && tabs[0].url && (tabs[0].url.startsWith('http://') || tabs[0].url.startsWith('https://'))) {
-        currentTabId = tabs[0].id;
-        currentTabUrl = new URL(tabs[0].url).hostname;
-        console.log('Set initial active tab:', { currentTabId, url: currentTabUrl });
-        checkFocus();
-      } else {
-        console.warn('No valid initial tab found');
-        stopTracking();
-      }
+    console.log('Initialized storage:', { 
+      totalTime, 
+      tabUsage: tabUsage.length, 
+      lastSyncDate, 
+      lastSyncedTotalTime, 
+      lastSyncedTabUsage: lastSyncedTabUsage.length, 
+      offlineQueue: offlineQueue.length 
     });
+
+    // Start tracking if Chrome is focused
+    setTimeout(() => checkFocus(), 1000);
   });
+}
+
+async function resetDailyData(newDate) {
+  try {
+    // Send remaining data to server before reset
+    if (totalTime > 0 || tabUsage.length > 0) {
+      const deltaData = {
+        totalTime: totalTime - lastSyncedTotalTime,
+        tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage),
+        date: lastSyncDate
+      };
+      
+      if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
+        offlineQueue.push(deltaData);
+        console.log('Queued final data for previous day:', deltaData);
+      }
+    }
+
+    // Reset all tracking data
+    totalTime = 0;
+    tabUsage = [];
+    lastSyncedTotalTime = 0;
+    lastSyncedTabUsage = [];
+    lastSyncDate = newDate;
+    
+    // Stop current tracking and reset state
+    isTracking = false;
+    currentTabId = null;
+    currentTabUrl = null;
+    tabStartTime = null;
+    
+    // Clear any active timers
+    if (activeTabTimer) {
+      clearInterval(activeTabTimer);
+      activeTabTimer = null;
+    }
+    
+    // Save reset state
+    await saveAllData();
+    
+    console.log('Daily data reset complete for:', newDate);
+    
+    // Trigger sync of queued data
+    setTimeout(() => syncData(), 2000);
+    
+  } catch (error) {
+    console.error('Error resetting daily data:', error);
+  }
 }
 
 async function fetchServerData(jwt, date, retries = 3) {
@@ -70,6 +234,7 @@ async function fetchServerData(jwt, date, retries = 3) {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${jwt}` },
       });
+      
       if (!response.ok) {
         if (response.status === 401 && attempt === 1) {
           console.log('JWT expired, attempting to refresh');
@@ -81,16 +246,26 @@ async function fetchServerData(jwt, date, retries = 3) {
         }
         throw new Error(`Fetch server data failed: ${response.status}`);
       }
+      
       const screenTimeData = await response.json();
       const todayData = screenTimeData.find((entry) => entry.date === date);
+      
       if (todayData) {
+        // Convert server data to local format and combine same URLs
+        const combinedTabUsage = combineTabUsageByUrl(todayData.tabs.map(tab => ({
+          tabId: tab.tabId || null,
+          url: tab.url,
+          timeSpent: tab.timeSpent
+        })));
+        
+        // Update local data with server data
         totalTime = todayData.totalTime;
-        tabUsage = todayData.tabs;
+        tabUsage = combinedTabUsage;
         lastSyncedTotalTime = todayData.totalTime;
-        lastSyncedTabUsage = [...todayData.tabs];
-        chrome.storage.local.set({ totalTime, tabUsage, lastSyncedTotalTime, lastSyncedTabUsage }, () => {
-          console.log('Updated local storage from server:', { totalTime, tabUsage });
-        });
+        lastSyncedTabUsage = [...combinedTabUsage];
+        
+        await saveAllData();
+        console.log('Updated local storage from server:', { totalTime, tabUsage: tabUsage.length });
       } else {
         console.log('No server data for today, preserving local data');
       }
@@ -102,14 +277,14 @@ async function fetchServerData(jwt, date, retries = 3) {
         notifyUser('Failed to sync with server. Using local data.');
         return false;
       }
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await sleep(1000);
     }
   }
 }
 
 async function refreshJwt() {
   try {
-    const result = await new Promise((resolve) => chrome.storage.local.get(['refreshToken'], resolve));
+    const result = await getStorageData(['refreshToken']);
     const refreshToken = result.refreshToken;
     if (!refreshToken) throw new Error('No refresh token available');
     
@@ -118,21 +293,22 @@ async function refreshJwt() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     });
+    
     if (!response.ok) throw new Error(`Refresh token failed: ${response.status}`);
     
     const data = await response.json();
-    chrome.storage.local.set({ jwt: data.token }, () => {
-      console.log('JWT refreshed successfully');
-    });
+    await setStorageData({ jwt: data.token });
+    console.log('JWT refreshed successfully');
     return data.token;
   } catch (error) {
     console.error('Error refreshing JWT:', error.message);
     notifyUser('Session expired. Please log in again.');
-    chrome.storage.local.remove('jwt');
+    await clearStorageData(['jwt', 'refreshToken']);
     return null;
   }
 }
 
+// Event listeners
 chrome.runtime.onInstalled.addListener(() => {
   console.log('Extension installed');
   initializeStorage();
@@ -145,150 +321,268 @@ chrome.runtime.onStartup.addListener(() => {
 
 // Handle system sleep/suspend
 chrome.runtime.onSuspend.addListener(() => {
-  console.log('System suspending, stopping tracking');
+  console.log('System suspending, saving state and stopping tracking');
+  if (isTracking && tabStartTime && currentTabId !== null && currentTabUrl) {
+    updateTabTime();
+  }
+  
+  // Save complete state before sleep
+  saveAllData({
+    isTracking,
+    currentTabId,
+    currentTabUrl,
+    tabStartTime,
+    totalTime,
+    tabUsage,
+    lastSyncDate,
+    offlineQueue,
+    lastSyncedTotalTime,
+    lastSyncedTabUsage
+  });
+  
   stopTracking();
 });
 
-// Handle system wake (optional, for robustness)
+// Handle system wake
 chrome.runtime.onSuspendCanceled.addListener(() => {
-  console.log('System suspend canceled, checking focus');
-  checkFocus();
+  console.log('System suspend canceled, restoring state');
+  // Restore state from storage
+  chrome.storage.local.get([
+    'isTracking', 'currentTabId', 'currentTabUrl', 'tabStartTime',
+    'totalTime', 'tabUsage', 'lastSyncDate', 'offlineQueue',
+    'lastSyncedTotalTime', 'lastSyncedTabUsage'
+  ], (result) => {
+    if (result.isTracking && result.currentTabId && result.currentTabUrl) {
+      currentTabId = result.currentTabId;
+      currentTabUrl = result.currentTabUrl;
+      totalTime = result.totalTime || 0;
+      tabUsage = result.tabUsage || [];
+      lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
+      lastSyncedTabUsage = result.lastSyncedTabUsage || [];
+      offlineQueue = result.offlineQueue || [];
+      
+      console.log('Restored state after wake:', { 
+        currentTabId, 
+        currentTabUrl, 
+        totalTime, 
+        tabUsage: tabUsage.length 
+      });
+    }
+    
+    // Check if Chrome is still focused and resume tracking
+    setTimeout(() => checkFocus(), 1000);
+  });
 });
 
 function checkFocus() {
   chrome.windows.getLastFocused({ populate: true }, (window) => {
+    if (chrome.runtime.lastError) {
+      console.error('Error getting focused window:', chrome.runtime.lastError);
+      stopTracking();
+      return;
+    }
+
     if (!window || window.state === 'minimized') {
-      console.log(`Window state: ${window?.state || 'unknown'}`);
+      console.log(`Window state: ${window?.state || 'unknown'} - stopping tracking`);
       stopTracking();
       return;
     }
 
     const activeTab = window.tabs.find((tab) => tab.active);
     if (!activeTab || !activeTab.id || !activeTab.url || activeTab.url.startsWith('chrome://')) {
-      console.log(`Window state: ${window?.state || 'unknown'}, invalid tab`);
+      console.log('No valid active tab found - stopping tracking');
       stopTracking();
       return;
     }
 
-    if (currentTabId !== activeTab.id) {
-      if (isTracking && tabStartTime && currentTabId !== null && currentTabUrl) {
-        updateTabTime(currentTabUrl);
-      }
-      currentTabId = activeTab.id;
-      currentTabUrl = new URL(activeTab.url).hostname;
-      console.log('Active tab changed:', { currentTabId, url: currentTabUrl });
-    } else if (!isTracking && currentTabId === activeTab.id && !currentTabUrl) {
-      currentTabUrl = new URL(activeTab.url).hostname;
-      console.log('Re-fetched URL for existing tab:', { currentTabId, url: currentTabUrl });
+    const newTabId = activeTab.id;
+    const newTabUrl = extractHostname(activeTab.url);
+
+    // If switching tabs, update the previous tab's time
+    if (isTracking && currentTabId !== null && currentTabId !== newTabId && tabStartTime) {
+      updateTabTime();
     }
 
+    // Update current tab info
+    currentTabId = newTabId;
+    currentTabUrl = newTabUrl;
+
     if (!isTracking) {
-      isTracking = true;
+      startTracking();
+    } else {
+      // Reset start time for new tab or continued tracking
       tabStartTime = Date.now();
-      lastUpdateTime = null;
-      console.log('Tracking status: Started');
-      console.log('Started tracking for tab:', { currentTabId, url: currentTabUrl });
+      lastUpdateTime = Date.now();
       startActiveTabTimer();
     }
   });
 }
 
+function startTracking() {
+  isTracking = true;
+  tabStartTime = Date.now();
+  lastUpdateTime = Date.now();
+  console.log('Started tracking for tab:', { currentTabId, url: currentTabUrl });
+  startActiveTabTimer();
+  saveAllData();
+}
+
 function stopTracking() {
-  if (isTracking && tabStartTime && currentTabId !== null && currentTabUrl) {
-    updateTabTime(currentTabUrl);
+  if (isTracking && tabStartTime && currentTabId !== null) {
+    updateTabTime();
   }
+  
   isTracking = false;
   tabStartTime = null;
   lastUpdateTime = null;
-  currentTabUrl = null;
   clearInterval(activeTabTimer);
   activeTabTimer = null;
-  saveData();
-  console.log('Tracking status: Stopped');
+  saveAllData();
+  console.log('Tracking stopped');
 }
 
 function startActiveTabTimer() {
   if (activeTabTimer) {
     clearInterval(activeTabTimer);
-    activeTabTimer = null;
   }
+  
   activeTabTimer = setInterval(() => {
     if (isTracking && currentTabId !== null && tabStartTime !== null && currentTabUrl) {
-      updateTabTime(currentTabUrl);
+      updateTabTime();
     }
   }, 1000);
 }
 
-function updateTabTime(url) {
-  if (!isTracking || !tabStartTime || !url) {
-    tabStartTime = isTracking ? Date.now() : null;
+function updateTabTime() {
+  if (!isTracking || !tabStartTime || !currentTabUrl || currentTabId === null) {
     return;
   }
 
   const currentTime = Date.now();
   const timeSpent = Math.floor((currentTime - tabStartTime) / 1000);
-  if (timeSpent >= 1 && (!lastUpdateTime || currentTime - lastUpdateTime >= 1000)) {
+  
+  if (timeSpent >= 1) {
     totalTime += timeSpent;
-    console.log('Calculating time spent:', { currentTabId, url, timeSpent, totalTime });
-    console.log('Tab switch update for:', url);
-
-    let existing = tabUsage.find((entry) => entry.url === url);
-    if (existing) {
-      existing.timeSpent = (existing.timeSpent || 0) + timeSpent;
+    
+    // Find existing tab entry by URL only (not tabId)
+    let existingTab = tabUsage.find(entry => entry.url === currentTabUrl);
+    
+    if (existingTab) {
+      existingTab.timeSpent += timeSpent;
     } else {
-      tabUsage.push({ url, timeSpent });
+      tabUsage.push({ 
+        tabId: currentTabId, 
+        url: currentTabUrl, 
+        timeSpent: timeSpent 
+      });
     }
-    console.log('Updated tab usage:', { url, timeSpent, tabUsage });
-    saveData();
-
+    
+    console.log('Updated tab usage:', { 
+      tabId: currentTabId, 
+      url: currentTabUrl, 
+      timeSpent, 
+      totalTime, 
+      totalTabs: tabUsage.length 
+    });
+    
+    saveAllData();
     tabStartTime = currentTime;
     lastUpdateTime = currentTime;
   }
 }
 
-function saveData() {
-  chrome.storage.local.set({ totalTime, tabUsage, lastSyncDate, offlineQueue, lastSyncedTotalTime, lastSyncedTabUsage }, () => {
-    if (chrome.runtime.lastError) {
-      console.error('Error saving to chrome.storage.local:', chrome.runtime.lastError);
+function combineTabUsageByUrl(tabUsageArray) {
+  const urlMap = new Map();
+  
+  tabUsageArray.forEach(tab => {
+    if (urlMap.has(tab.url)) {
+      urlMap.get(tab.url).timeSpent += tab.timeSpent;
     } else {
-      console.log('Saved data:', { totalTime, tabUsage, lastSyncDate, lastSyncedTotalTime, lastSyncedTabUsage });
+      urlMap.set(tab.url, {
+        tabId: tab.tabId,
+        url: tab.url,
+        timeSpent: tab.timeSpent
+      });
     }
   });
+  
+  return Array.from(urlMap.values());
 }
 
-chrome.windows.onFocusChanged.addListener(() => {
-  console.log('Focus changed, checking...');
-  checkFocus();
+function saveAllData(extraData = {}) {
+  // Combine same URLs before saving
+  const combinedTabUsage = combineTabUsageByUrl(tabUsage);
+  
+  const dataToSave = {
+    totalTime,
+    tabUsage: combinedTabUsage,
+    lastSyncDate,
+    offlineQueue,
+    lastSyncedTotalTime,
+    lastSyncedTabUsage,
+    isTracking,
+    currentTabId,
+    currentTabUrl,
+    tabStartTime,
+    ...extraData
+  };
+  
+  // Update the in-memory tabUsage with combined data
+  tabUsage = combinedTabUsage;
+  
+  return setStorageData(dataToSave);
+}
+
+// Window and tab event listeners
+chrome.windows.onFocusChanged.addListener((windowId) => {
+  console.log('Window focus changed:', windowId);
+  if (windowId === chrome.windows.WINDOW_ID_NONE) {
+    // All windows lost focus
+    stopTracking();
+  } else {
+    // A window gained focus
+    setTimeout(() => checkFocus(), 100);
+  }
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  if (isTracking && tabStartTime && currentTabId !== null && currentTabUrl) {
-    updateTabTime(currentTabUrl);
+  console.log('Tab activated:', activeInfo.tabId);
+  
+  if (isTracking && currentTabId !== null && tabStartTime) {
+    updateTabTime();
   }
-  currentTabId = activeInfo.tabId;
-  chrome.tabs.get(currentTabId, (tab) => {
+  
+  chrome.tabs.get(activeInfo.tabId, (tab) => {
     if (chrome.runtime.lastError || !tab || !tab.url || tab.url.startsWith('chrome://')) {
-      console.warn('Tab not found or invalid on activation:', chrome.runtime.lastError?.message || tab);
+      console.warn('Invalid tab on activation:', chrome.runtime.lastError?.message);
       stopTracking();
       return;
     }
-    currentTabUrl = new URL(tab.url).hostname;
-    tabStartTime = isTracking ? Date.now() : null;
-    console.log('Tab activated:', { currentTabId, url: currentTabUrl });
-    if (isTracking) startActiveTabTimer();
+    
+    currentTabId = activeInfo.tabId;
+    currentTabUrl = extractHostname(tab.url);
+    
+    if (isTracking) {
+      tabStartTime = Date.now();
+      startActiveTabTimer();
+    }
+    
+    console.log('Tab activated and updated:', { currentTabId, url: currentTabUrl });
   });
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (isTracking && tabId === currentTabId && changeInfo.url) {
-    if (tabStartTime && currentTabUrl) {
-      updateTabTime(currentTabUrl);
+  if (tabId === currentTabId && changeInfo.url && isTracking) {
+    // URL changed on current tab
+    if (tabStartTime) {
+      updateTabTime();
     }
+    
     if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
-      currentTabUrl = new URL(tab.url).hostname;
-      tabStartTime = isTracking ? Date.now() : null;
-      console.log('Tab updated:', { currentTabId, url: currentTabUrl });
-      if (isTracking) startActiveTabTimer();
+      currentTabUrl = extractHostname(tab.url);
+      tabStartTime = Date.now();
+      console.log('Tab URL updated:', { currentTabId, url: currentTabUrl });
+      startActiveTabTimer();
     } else {
       console.warn('Invalid tab URL on update:', tab.url);
       stopTracking();
@@ -298,13 +592,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   if (tabId === currentTabId) {
-    if (isTracking && tabStartTime && currentTabUrl) {
-      updateTabTime(currentTabUrl);
+    console.log('Current tab removed');
+    if (isTracking && tabStartTime) {
+      updateTabTime();
     }
     stopTracking();
   }
 });
 
+// Sync functionality
 const SYNC_INTERVAL_MINUTES = 5;
 chrome.alarms.create('syncData', { periodInMinutes: SYNC_INTERVAL_MINUTES });
 
@@ -317,62 +613,83 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 async function syncData() {
   console.log('Starting data sync');
+  
   try {
-    const result = await new Promise((resolve) => {
-      chrome.storage.local.get(['jwt', 'totalTime', 'tabUsage', 'offlineQueue', 'lastSyncDate', 'lastSyncedTotalTime', 'lastSyncedTabUsage'], resolve);
-    });
-    if (chrome.runtime.lastError) {
-      console.error('Error accessing chrome.storage.local:', chrome.runtime.lastError);
-      return;
-    }
-    let jwt = result.jwt || null;
-    let syncTotalTime = result.totalTime || 0;
-    let syncTabUsage = result.tabUsage || [];
-    let offlineQueue = (result.offlineQueue || []).map(item => ({
-      ...item,
-      date: typeof item.date === 'number' ? new Date(item.date).toISOString().split('T')[0] : item.date
-    }));
-    let syncLastSyncDate = result.lastSyncDate || new Date().toISOString().split('T')[0];
-    let lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
-    let lastSyncedTabUsage = result.lastSyncedTabUsage || [];
+    const result = await getStorageData([
+      'jwt', 'totalTime', 'tabUsage', 'offlineQueue', 'lastSyncDate', 
+      'lastSyncedTotalTime', 'lastSyncedTabUsage'
+    ]);
+    
+    let jwt = result.jwt;
     const currentDate = new Date().toISOString().split('T')[0];
-
-    console.log('Sync data state:', { jwt, syncTotalTime, syncTabUsageLength: syncTabUsage.length, lastSyncedTotalTime, lastSyncedTabUsageLength: lastSyncedTabUsage.length, offlineQueueLength: offlineQueue.length, syncLastSyncDate });
-
+    
     if (!jwt) {
-      console.log('No JWT, queuing data');
-      offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: currentDate });
-      saveData();
+      console.log('No JWT, queuing data for later sync');
+      const deltaData = {
+        totalTime: totalTime - lastSyncedTotalTime,
+        tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage),
+        date: currentDate
+      };
+      
+      if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
+        offlineQueue.push(deltaData);
+        await saveAllData();
+      }
+      
       notifyUser('Please log in to sync data.');
       return;
     }
-
-    if (currentDate !== syncLastSyncDate) {
-      offlineQueue.push({ totalTime: syncTotalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage), date: syncLastSyncDate });
-      syncTotalTime = 0;
-      syncTabUsage = [];
-      lastSyncedTotalTime = 0;
-      lastSyncedTabUsage = [];
-      syncLastSyncDate = currentDate;
-      saveData();
-      console.log('Date changed, queued previous day and reset:', { syncTotalTime, syncTabUsage, lastSyncedTotalTime, lastSyncedTabUsage, syncLastSyncDate });
+    
+    // Check if date changed during sync
+    if (currentDate !== lastSyncDate) {
+      await resetDailyData(currentDate);
+      return;
     }
-
-    const deltaTotalTime = syncTotalTime - lastSyncedTotalTime;
-    const deltaTabUsage = calculateTabUsageDelta(syncTabUsage, lastSyncedTabUsage);
-    const dataToSync = [...offlineQueue, { totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate }].filter(
-      (item) => item.date === currentDate
-    );
-
+    
+    const deltaTotalTime = totalTime - lastSyncedTotalTime;
+    const deltaTabUsage = calculateTabUsageDelta(tabUsage, lastSyncedTabUsage);
+    
+    // Prepare all data to sync (offline queue + current delta)
+    const dataToSync = [
+      ...offlineQueue,
+      ...(deltaTotalTime > 0 || deltaTabUsage.length > 0 ? [{
+        totalTime: deltaTotalTime,
+        tabs: deltaTabUsage,
+        date: currentDate
+      }] : [])
+    ].filter(item => item.totalTime > 0 || item.tabs.length > 0);
+    
     if (!navigator.onLine) {
       console.log('Offline, queuing data');
-      offlineQueue.push({ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate });
-      saveData();
+      if (deltaTotalTime > 0 || deltaTabUsage.length > 0) {
+        offlineQueue.push({
+          totalTime: deltaTotalTime,
+          tabs: deltaTabUsage,
+          date: currentDate
+        });
+        await saveAllData();
+      }
       notifyUser('Offline. Data will sync when online.');
       return;
     }
-
+    
+    if (dataToSync.length === 0) {
+      console.log('No data to sync');
+      return;
+    }
+    
+    // Sync each data item
     for (const item of dataToSync) {
+      console.log('Syncing data item:', { 
+        totalTime: item.totalTime, 
+        tabs: item.tabs.length, 
+        date: item.date 
+      });
+      
+      // Decode JWT to get userId
+      const decodedJwt = jwtDecode(jwt);
+      const userId = decodedJwt?.userId || 'unknown';
+      
       const response = await fetch('http://localhost:5000/screen-time', {
         method: 'POST',
         headers: {
@@ -380,126 +697,81 @@ async function syncData() {
           'Authorization': `Bearer ${jwt}`,
         },
         body: JSON.stringify({
-          userId: (jwt && jwtDecode(jwt)?.userId) || 'unknown',
+          userId: userId,
           date: item.date,
           totalTime: item.totalTime,
           tabs: item.tabs,
         }),
       });
-
+      
       if (!response.ok) {
         if (response.status === 401) {
-          console.log('JWT expired, attempting to refresh');
+          console.log('JWT expired during sync, refreshing');
           const newJwt = await refreshJwt();
           if (newJwt) {
-            item.userId = (newJwt && jwtDecode(newJwt)?.userId) || 'unknown';
-            return await syncData();
+            jwt = newJwt;
+            return await syncData(); // Retry with new JWT
           }
-          notifyUser('Session expired. Please log in again.');
-          chrome.storage.local.remove('jwt');
+          
+          // JWT refresh failed, queue data
           offlineQueue.push(item);
-          saveData();
-          console.log('JWT expired, queued data:', { item });
+          await saveAllData();
+          notifyUser('Session expired. Please log in again.');
           return;
         }
         throw new Error(`Sync failed: ${response.status}`);
       }
-
-      console.log('Sync successful:', await response.json());
-      lastSyncedTotalTime = syncTotalTime;
-      lastSyncedTabUsage = [...syncTabUsage];
-      const success = await fetchServerData(jwt, currentDate);
-      if (!success) {
-        console.log('Preserving local data due to fetch failure');
-      }
-      saveData();
+      
+      const responseData = await response.json();
+      console.log('Sync successful:', responseData);
     }
-
-    offlineQueue = offlineQueue.filter((item) => item.date !== currentDate);
-    saveData();
+    
+    // Update sync markers
+    lastSyncedTotalTime = totalTime;
+    lastSyncedTabUsage = [...tabUsage];
+    
+    // Clear synced offline queue items
+    offlineQueue = offlineQueue.filter(item => item.date !== currentDate);
+    
+    await saveAllData();
+    console.log('Sync completed successfully');
+    
   } catch (error) {
     console.error('Sync error:', error.message);
-    if (error.message.includes('No SW')) {
-      console.warn('Service worker unavailable, retrying sync on next alarm');
-      notifyUser('Service worker issue. Data will sync later.');
-    } else {
-      offlineQueue.push({ totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: currentDate });
-      saveData();
-      notifyUser('Failed to sync data. Will retry later.');
+    
+    // Queue current data if sync failed
+    const deltaData = {
+      totalTime: totalTime - lastSyncedTotalTime,
+      tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage),
+      date: new Date().toISOString().split('T')[0]
+    };
+    
+    if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
+      offlineQueue.push(deltaData);
+      await saveAllData();
     }
+    
+    notifyUser('Sync failed. Data queued for retry.');
   }
 }
 
-function calculateTabUsageDelta(currentTabUsage, lastSyncedTabUsage) {
-  const deltaTabUsage = [];
-  const lastSyncedMap = new Map(lastSyncedTabUsage.map((tab) => [tab.url, tab.timeSpent]));
-
-  currentTabUsage.forEach((tab) => {
-    const lastSyncedTime = lastSyncedMap.get(tab.url) || 0;
-    const deltaTime = tab.timeSpent - lastSyncedTime;
-    if (deltaTime > 0) {
-      deltaTabUsage.push({ url: tab.url, timeSpent: deltaTime });
-    }
-  });
-
-  return deltaTabUsage;
-}
-
-function notifyUser(message) {
-  try {
-    chrome.notifications.create({
-      type: 'basic',
-      iconUrl: 'icon128.png',
-      title: 'ChillBoard Extension',
-      message,
-      priority: 2,
+// Message handler for popup communication
+chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+  if (request.action === 'getScreenTime') {
+    sendResponse({
+      totalTime: totalTime,
+      tabUsage: tabUsage,
+      isTracking: isTracking,
+      currentTabUrl: currentTabUrl
     });
-  } catch (error) {
-    console.warn('Notification failed:', error.message);
+  } else if (request.action === 'resetData') {
+    resetDailyData(new Date().toISOString().split('T')[0]);
+    sendResponse({ success: true });
+  } else if (request.action === 'syncNow') {
+    syncData();
+    sendResponse({ success: true });
   }
-}
-
-self.addEventListener('online', () => {
-  console.log('Back online, syncing...');
-  syncData();
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  try {
-    if (message.action === 'openWebApp') {
-      chrome.tabs.create({ url: 'http://localhost:3000' }, () => {
-        if (chrome.runtime.lastError) {
-          console.warn('Failed to open web app:', chrome.runtime.lastError.message);
-        }
-      });
-      sendResponse({ status: 'success' });
-    } else if (message.action === 'syncData') {
-      syncData();
-      sendResponse({ status: 'success' });
-    } else if (message.action === 'getCurrentStats') {
-      sendResponse({ status: 'success', totalTime, tabUsage });
-    }
-  } catch (error) {
-    console.warn('Message handling error:', error.message);
-    sendResponse({ status: 'error', message: error.message });
-  }
-  return true; // Keep message channel open for async response
-});
-
-// Helper function to decode JWT
-function jwtDecode(token) {
-  try {
-    const base64Url = token.split('.')[1];
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-    const jsonPayload = decodeURIComponent(
-      atob(base64)
-        .split('')
-        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-        .join('')
-    );
-    return JSON.parse(jsonPayload);
-  } catch (e) {
-    console.error('JWT decode error:', e);
-    return null;
-  }
-}
+// Initialize on startup
+initializeStorage();

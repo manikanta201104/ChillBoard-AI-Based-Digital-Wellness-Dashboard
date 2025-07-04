@@ -1,3 +1,5 @@
+/*global chrome*/
+
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
@@ -174,6 +176,8 @@ const Dashboard = () => {
       } catch (err) {
         setError(err.message || 'Failed to fetch user data');
         setSpotifyToken('');
+        // Attempt to re-authenticate if token is missing or invalid
+        handleSpotifyConnect();
       }
     };
 
@@ -423,7 +427,8 @@ const Dashboard = () => {
       setError('New playlist loaded!');
       setIsPlaying(false);
     } catch (err) {
-      setError('Failed to fetch new playlist');
+      setError(`Failed to fetch new playlist: ${err.message}. Attempting re-authentication...`);
+      await handleSpotifyConnect(); // Trigger re-auth if fetch fails
     }
   };
 
@@ -556,6 +561,11 @@ const Dashboard = () => {
                       play={isPlaying}
                       callback={state => {
                         if (state.isPlaying) console.log('Playing:', state.track.name);
+                        if (state.error) {
+                          console.error('Playback error:', state.error);
+                          setError(`Playback failed: ${state.error.message}. Re-authenticating...`);
+                          handleSpotifyConnect();
+                        }
                       }}
                       styles={{
                         bgColor: '#e5e7eb',

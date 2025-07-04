@@ -142,8 +142,8 @@ router.get('/playlist', authMiddleware, async (req, res) => {
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
     const now = Date.now();
     const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
-    let currentAccessToken = accessToken;
 
+    let currentAccessToken = accessToken;
     if (now >= tokenExpiry) {
       logger.info('Token expired, refreshing', { userId, tokenExpiry });
       currentAccessToken = await refreshAccessToken(userId, refreshToken);
@@ -154,6 +154,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
+    // Only check cache if not skipping
     let cachedPlaylist = null;
     if (!skip) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
