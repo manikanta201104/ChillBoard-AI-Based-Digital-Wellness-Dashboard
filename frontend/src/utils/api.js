@@ -107,7 +107,7 @@ export const savePlaylist = async (playlistId, data) => {
 export const fetchNewPlaylist = async mood => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.get(`spotify/playlist?mood=${mood}`, {
+  const response = await api.get(`spotify/playlist?mood=${mood}${skip ? '&skip=true' : ''}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
