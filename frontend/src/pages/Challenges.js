@@ -8,6 +8,7 @@ const Challenges = () => {
   const [selectedChallengeId, setSelectedChallengeId] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const userId = localStorage.getItem('userId');
 
   const fetchLeaderboard = async (challengeId) => {
     try {
@@ -25,12 +26,17 @@ const Challenges = () => {
         const data = await getChallenges();
         setChallenges(data);
 
-        const joined = data.find(challenge => 
-          challenge.participants.some(p => p.userId === localStorage.getItem('userId'))
-        );
-        if (joined) {
-          setSelectedChallengeId(joined.challengeId);
-          await fetchLeaderboard(joined.challengeId);
+        // Check which challenges the user has joined
+        const joined = data.filter(challenge =>
+          challenge.participants.some(p => p.userId === userId)
+        ).map(challenge => challenge.challengeId);
+        const joinedSet = new Set(joined);
+        setJoinedChallenges(joinedSet);
+
+        if (joined.length > 0) {
+          const latestJoined = joined[0]; // Use the most recently joined challenge
+          setSelectedChallengeId(latestJoined);
+          await fetchLeaderboard(latestJoined);
         }
       } catch (err) {
         setError(err.message || 'Failed to fetch challenges');
@@ -40,22 +46,20 @@ const Challenges = () => {
     };
 
     fetchChallenges();
-  }, []);
+  }, [userId]);
 
   const handleJoinChallenge = async (challengeId) => {
     setLoading(true);
     try {
       const response = await joinChallenge(challengeId);
-      const userId = localStorage.getItem('userId') || response.userId || (await getUserFromToken());
-      if (userId) {
-        localStorage.setItem('userId', userId);
-      } else {
-        throw new Error('Unable to determine userId');
-      }
-      setJoinedChallenges(prev => new Set(prev).add(challengeId));
+      const updatedJoined = new Set(joinedChallenges).add(challengeId);
+      setJoinedChallenges(updatedJoined);
       setSelectedChallengeId(challengeId);
       await fetchLeaderboard(challengeId);
       setError('Successfully joined challenge!');
+      // Store joined challenge in localStorage for persistence
+      const joinedList = Array.from(updatedJoined);
+      localStorage.setItem('joinedChallenges', JSON.stringify(joinedList));
     } catch (err) {
       setError(err.message || 'Failed to join challenge');
     } finally {
@@ -78,6 +82,20 @@ const Challenges = () => {
     }
   };
 
+  // Load joined challenges from localStorage on mount
+  useEffect(() => {
+    const storedJoined = localStorage.getItem('joinedChallenges');
+    if (storedJoined) {
+      setJoinedChallenges(new Set(JSON.parse(storedJoined)));
+    }
+    // Ensure userId is set if not already
+    if (!userId) {
+      getUserFromToken().then(id => {
+        if (id) localStorage.setItem('userId', id);
+      });
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-blue-100 p-4 md:p-6">
       <h1 className="text-3xl font-bold text-center text-green-600 mb-8 sm:text-2xl">
@@ -91,6 +109,7 @@ const Challenges = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
           {challenges.map(challenge => {
             const isJoined = joinedChallenges.has(challenge.challengeId);
+            const reduction = challenge.participants.find(p => p.userId === userId)?.reduction / 3600 || 0;
             return (
               <div
                 key={challenge.challengeId}
@@ -101,12 +120,12 @@ const Challenges = () => {
                 </h2>
                 <p className="text-gray-700 mt-2 sm:text-sm">{challenge.description}</p>
                 {isJoined ? (
-                  <p className="mt-4 text-green-600 sm:text-sm">Joined - 0 hours reduced</p>
+                  <p className="mt-4 text-green-600 sm:text-sm">Joined - {reduction.toFixed(1)} hours reduced</p>
                 ) : (
                   <button
                     onClick={() => handleJoinChallenge(challenge.challengeId)}
                     className="mt-4 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 disabled:bg-gray-400 sm:text-sm"
-                    disabled={loading}
+                    disabled={loading || isJoined}
                   >
                     Join
                   </button>
