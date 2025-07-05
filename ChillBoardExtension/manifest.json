@@ -16,7 +16,8 @@
     "http://localhost:3000/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_popup": "popup.html"
@@ -25,5 +26,11 @@
     "16": "icon16.png",
     "48": "icon48.png",
     "128": "icon128.png"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["popup.html", "background.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 }
