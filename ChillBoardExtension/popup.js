@@ -34,7 +34,6 @@ document.addEventListener('DOMContentLoaded', () => {
   async function initializePopup() {
     try {
       const result = await getStorageData(['jwt', 'refreshToken']);
-      
       if (result.jwt) {
         const decoded = jwtDecode(result.jwt);
         if (!decoded || decoded.exp * 1000 < Date.now()) {
@@ -45,7 +44,6 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
         }
-        
         await showStats();
         const currentDate = new Date().toISOString().split('T')[0];
         await fetchScreenTimeWithRetry(result.jwt, currentDate);
@@ -55,39 +53,40 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Error initializing popup:', error);
       showLogin();
-      if (loginError) {
-        loginError.textContent = 'Error loading extension. Please try again.';
-      }
+      if (loginError) loginError.textContent = 'Error loading extension. Please try again.';
     }
   }
 
-  async function fetchScreenTimeWithRetry(jwt, date, maxRetries = 2) {
+  async function fetchScreenTimeWithRetry(jwt, date, maxRetries = 3) {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const success = await fetchScreenTime(jwt, date, 1);
+        const success = await fetchScreenTime(jwt, date, attempt);
         if (success) {
           await updateStatsDisplay();
           return true;
         }
       } catch (error) {
-        console.error(`Fetch attempt ${attempt} failed:`, error);
+        console.error(`Fetch attempt ${attempt} failed:`, error.message);
         if (attempt === maxRetries) {
           console.log('Max retries reached, using local data');
-          if (loginError) {
+          if (loginError && !navigator.onLine) {
+            loginError.textContent = 'Offline mode: Using cached data.';
+            setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
+          } else if (loginError) {
             loginError.textContent = 'Server connection failed. Showing offline data.';
             setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
           }
           await updateStatsDisplay();
           return false;
         }
-        await sleep(1000 * attempt);
+        await sleep(2000 * attempt);
       }
     }
     return false;
   }
 
   async function fetchScreenTime(jwt, date, retries = 1) {
-    if (isLoading || isPopupClosing) return false;
+    if (isLoading || isPopupClosing || !navigator.onLine) return false;
     
     isLoading = true;
     if (totalTimeSpan) totalTimeSpan.textContent = 'Loading...';
@@ -96,7 +95,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => {
+        console.log(`Fetch timed out after 20s (attempt ${retries})`);
+        controller.abort();
+      }, 20000);
 
       const response = await fetch('http://localhost:5000/screen-time', {
         method: 'GET',
@@ -133,8 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
           totalTime: todayData.totalTime || 0, 
           tabUsage: combinedTabUsage,
           lastSyncedTotalTime: todayData.totalTime || 0,
-          lastSyncedTabUsage: combinedTabUsage,
-          lastServerSync: Date.now()
+          lastSyncedTabUsage: combinedTabUsage
         });
       }
       
@@ -167,7 +168,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!refreshToken) throw new Error('No refresh token available');
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
       const response = await fetch('http://localhost:5000/screen-time/refresh-token', {
         method: 'POST',
@@ -211,25 +212,31 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isPopupClosing) return;
     
     try {
-      const syncResponse = await sendMessageToBackgroundWithRetry({ action: 'syncData' });
+      const pingResponse = await sendMessageToBackgroundWithRetry({ action: 'ping' }, 5, 1000);
+      if (!pingResponse || pingResponse.status !== 'success') {
+        console.warn('Background script not ready, using local data');
+        await useLocalData();
+        return;
+      }
+
+      const syncResponse = await sendMessageToBackgroundWithRetry({ action: 'syncData' }, 5, 1000);
       if (!syncResponse) console.warn('Failed to sync data with background script');
       
-      await sleep(300);
+      await sleep(500);
       
-      const response = await sendMessageToBackgroundWithRetry({ action: 'getCurrentStats' });
+      const response = await sendMessageToBackgroundWithRetry({ action: 'getCurrentStats' }, 5, 1000);
       let totalTime = 0, tabUsage = [], trackingStatus = null;
       
       if (response && response.status === 'success') {
         totalTime = response.totalTime || 0;
         tabUsage = response.tabUsage || [];
-        const statusResponse = await sendMessageToBackgroundWithRetry({ action: 'getTrackingStatus' });
+        const statusResponse = await sendMessageToBackgroundWithRetry({ action: 'getTrackingStatus' }, 5, 1000);
         if (statusResponse && statusResponse.status === 'success') {
           trackingStatus = statusResponse;
         }
       } else {
-        const localData = await getStorageData(['totalTime', 'tabUsage']);
-        totalTime = localData.totalTime || 0;
-        tabUsage = localData.tabUsage || [];
+        await useLocalData();
+        return;
       }
 
       tabUsage = combineTabUsageByUrl(tabUsage);
@@ -264,12 +271,47 @@ document.addEventListener('DOMContentLoaded', () => {
         });
       }
     } catch (error) {
-      console.error('Error updating stats display:', error);
-      if (totalTimeSpan) totalTimeSpan.textContent = 'Error loading stats';
+      console.error('Error updating stats display:', error.message);
+      await useLocalData();
       if (loginError) {
-        loginError.textContent = 'Error loading stats. Please refresh.';
+        loginError.textContent = 'Error loading stats. Using cached data.';
         setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
       }
+    }
+  }
+
+  async function useLocalData() {
+    const localData = await getStorageData(['totalTime', 'tabUsage', 'lastSyncedTotalTime', 'lastSyncedTabUsage']);
+    const totalTime = localData.totalTime || localData.lastSyncedTotalTime || 0;
+    const tabUsage = localData.tabUsage || localData.lastSyncedTabUsage || [];
+    const trackingStatus = await getStorageData(['isTracking', 'currentTabUrl']) || { isTracking: false, currentTabUrl: '' };
+
+    if (totalTimeSpan) totalTimeSpan.textContent = formatTime(totalTime);
+    if (tabCountSpan) tabCountSpan.textContent = tabUsage.length.toString();
+    if (trackingStatusSpan) {
+      trackingStatusSpan.textContent = trackingStatus.isTracking ? 'Active' : 'Inactive';
+      trackingStatusSpan.className = trackingStatus.isTracking ? 'status-active' : 'status-inactive';
+    }
+    if (currentTabSpan) currentTabSpan.textContent = trackingStatus.currentTabUrl || '';
+
+    if (tabUsageList) {
+      tabUsageList.innerHTML = '';
+      const sortedTabs = [...tabUsage].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0));
+      sortedTabs.forEach(entry => {
+        if (!entry || !entry.url || entry.timeSpent <= 0) return;
+        const li = document.createElement('li');
+        li.className = 'tab-entry';
+        const urlSpan = document.createElement('span');
+        urlSpan.className = 'tab-url';
+        urlSpan.textContent = entry.url;
+        urlSpan.title = entry.url;
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'tab-time';
+        timeSpan.textContent = formatTime(entry.timeSpent);
+        li.appendChild(urlSpan);
+        li.appendChild(timeSpan);
+        tabUsageList.appendChild(li);
+      });
     }
   }
 
@@ -302,7 +344,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => {
+        console.log('Login timed out after 20s');
+        controller.abort();
+      }, 20000);
 
       const response = await fetch('http://localhost:5000/auth/login', {
         method: 'POST',
@@ -324,7 +369,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentDate = new Date().toISOString().split('T')[0];
       await fetchScreenTimeWithRetry(data.token, currentDate);
     } catch (error) {
-      console.error('Login error:', error);
+      console.error('Login error:', error.message);
       if (loginError) {
         if (error.name === 'AbortError') loginError.textContent = 'Login request timed out. Please try again.';
         else loginError.textContent = error.message || 'Login failed. Please try again.';
@@ -339,7 +384,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function handleLogout() {
     try {
-      await clearStorageData(['jwt', 'refreshToken', 'lastServerSync']);
+      await clearStorageData(['jwt', 'refreshToken', 'lastServerSync', 'tabStartTime', 'currentTabId', 'currentTabUrl', 'isTracking']);
       showLogin();
     } catch (error) {
       console.error('Logout error:', error);
@@ -348,7 +393,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleOpenWebApp() {
-    sendMessageToBackgroundWithRetry({ action: 'openWebApp' });
+    sendMessageToBackgroundWithRetry({ action: 'openWebApp' }, 5, 1000);
   }
 
   function showLogin() {
@@ -370,7 +415,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (statsUpdateInterval) clearInterval(statsUpdateInterval);
     statsUpdateInterval = setInterval(async () => {
       if (!isPopupClosing) await updateStatsDisplay();
-    }, 3000);
+    }, 5000);
   }
 
   if (loginBtn) loginBtn.addEventListener('click', handleLogin);
@@ -424,7 +469,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  async function sendMessageToBackgroundWithRetry(message, maxRetries = 3, retryDelay = 1000) {
+  async function sendMessageToBackgroundWithRetry(message, maxRetries = 5, retryDelay = 1000) {
     if (isPopupClosing) {
       console.warn('Popup is closing, aborting message send');
       return null;
@@ -433,8 +478,8 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
         const response = await new Promise((resolve, reject) => {
-          const timeoutId = setTimeout(() => reject(new Error('Message send timed out')), 5000);
-          chrome.runtime.sendMessage(message, response => {
+          const timeoutId = setTimeout(() => reject(new Error('Message send timed out')), 20000);
+          chrome.runtime.sendMessage(message, (response) => {
             clearTimeout(timeoutId);
             if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
             else resolve(response);
@@ -446,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
           await sleep(retryDelay * attempt);
         }
       } catch (error) {
-        console.error(`Attempt ${attempt} - Message send error:`, error);
+        console.error(`Attempt ${attempt} - Message send error:`, error.message);
         if (attempt === maxRetries) {
           console.error('Max retries reached for background message');
           return null;

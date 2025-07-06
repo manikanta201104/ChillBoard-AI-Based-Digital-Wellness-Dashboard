@@ -10,6 +10,7 @@ let lastUpdateTime = null;
 let currentTabUrl = null;
 let lastSyncedTotalTime = 0;
 let lastSyncedTabUsage = [];
+let isOnline = true; // Initial assumption
 
 console.log('Service worker started');
 
@@ -43,7 +44,7 @@ function getStorageData(keys) {
       if (chrome.runtime.lastError) {
         console.error('Storage get error:', chrome.runtime.lastError);
         resolve({});
-      } else resolve(result);
+      } else resolve(result || {});
     });
   });
 }
@@ -127,11 +128,13 @@ function initializeStorage() {
         currentTabId = result.currentTabId;
         currentTabUrl = result.currentTabUrl;
         tabStartTime = Date.now();
+        startTracking();
       }
     }
 
     if (result.jwt) await fetchServerData(result.jwt, currentDate);
     setTimeout(checkFocus, 1000);
+    startNetworkPolling();
   });
 }
 
@@ -166,9 +169,15 @@ async function resetDailyData(newDate) {
 async function fetchServerData(jwt, date, retries = 3) {
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
+      if (!isOnline) {
+        console.log('Offline, skipping fetch attempt');
+        return false;
+      }
+
       const response = await fetch('http://localhost:5000/screen-time', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${jwt}` },
+        signal: AbortSignal.timeout(20000) // Increased to 20s
       });
       if (!response.ok) {
         if (response.status === 401 && attempt === 1) {
@@ -176,7 +185,7 @@ async function fetchServerData(jwt, date, retries = 3) {
           if (newJwt) return await fetchServerData(newJwt, date, retries);
           throw new Error('JWT refresh failed');
         }
-        throw new Error(`Fetch server data failed: ${response.status}`);
+        throw new Error(`Fetch server data failed: HTTP ${response.status} - ${response.statusText}`);
       }
       const screenTimeData = await response.json();
       const todayData = screenTimeData.find(entry => entry.date === date);
@@ -194,12 +203,26 @@ async function fetchServerData(jwt, date, retries = 3) {
       }
       return true;
     } catch (error) {
-      console.error(`Fetch server data attempt ${attempt} failed:`, error.message);
-      if (attempt === retries) {
-        notifyUser('Failed to sync with server. Using local data.');
-        return false;
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        console.warn(`Fetch attempt ${attempt} failed: Network error (offline or server unavailable)`);
+        if (attempt === retries) {
+          notifyUser('Network error. Using local data.');
+          return false;
+        }
+      } else if (error.name === 'AbortError') {
+        console.warn(`Fetch attempt ${attempt} timed out`);
+        if (attempt === retries) {
+          notifyUser('Server timeout. Using local data.');
+          return false;
+        }
+      } else {
+        console.error(`Fetch server data attempt ${attempt} failed:`, error.message);
+        if (attempt === retries) {
+          notifyUser('Server sync failed. Using local data.');
+          return false;
+        }
       }
-      await sleep(1000);
+      await sleep(1000 * attempt); // Exponential backoff
     }
   }
 }
@@ -213,6 +236,7 @@ async function refreshJwt() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
+      signal: AbortSignal.timeout(10000)
     });
     if (!response.ok) throw new Error(`Refresh token failed: ${response.status}`);
     const data = await response.json();
@@ -254,6 +278,7 @@ chrome.runtime.onSuspendCanceled.addListener(() => {
       lastSyncedTotalTime = result.lastSyncedTotalTime || 0;
       lastSyncedTabUsage = result.lastSyncedTabUsage || [];
       offlineQueue = result.offlineQueue || [];
+      startTracking();
     }
     setTimeout(checkFocus, 1000);
   });
@@ -395,7 +420,7 @@ chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'syncData') syncData();
 });
 
-async function syncData() {
+async function syncData(maxRetries = 3) {
   console.log('Starting data sync');
   try {
     const result = await getStorageData(['jwt', 'totalTime', 'tabUsage', 'offlineQueue', 'lastSyncDate', 'lastSyncedTotalTime', 'lastSyncedTabUsage']);
@@ -424,7 +449,7 @@ async function syncData() {
       ...(deltaTotalTime > 0 || deltaTabUsage.length > 0 ? [{ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate }] : [])
     ].filter(item => item.totalTime > 0 || item.tabs.length > 0);
 
-    if (!navigator.onLine) {
+    if (!isOnline) {
       if (deltaTotalTime > 0 || deltaTabUsage.length > 0) {
         offlineQueue.push({ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate });
         await saveAllData();
@@ -438,24 +463,53 @@ async function syncData() {
     for (const item of dataToSync) {
       const decodedJwt = jwtDecode(jwt);
       const userId = decodedJwt?.userId || 'unknown';
-      const response = await fetch('http://localhost:5000/screen-time', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
-        body: JSON.stringify({ userId, date: item.date, totalTime: item.totalTime, tabs: item.tabs }),
-      });
-      if (!response.ok) {
-        if (response.status === 401) {
-          const newJwt = await refreshJwt();
-          if (newJwt) {
-            jwt = newJwt;
-            return await syncData();
+      console.log('Syncing data:', { userId, date: item.date, totalTime: item.totalTime, tabs: item.tabs });
+      let attempt = 0;
+      while (attempt < maxRetries) {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+          const response = await fetch('http://localhost:5000/screen-time', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+            body: JSON.stringify({ userId, date: item.date, totalTime: item.totalTime, tabs: item.tabs }),
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
+          if (!response.ok) {
+            if (response.status === 401) {
+              const newJwt = await refreshJwt();
+              if (newJwt) {
+                jwt = newJwt;
+                return await syncData(maxRetries);
+              }
+              offlineQueue.push(item);
+              await saveAllData();
+              notifyUser('Session expired. Please log in again.');
+              return;
+            }
+            throw new Error(`Sync failed: ${response.status} - ${response.statusText}`);
           }
-          offlineQueue.push(item);
-          await saveAllData();
-          notifyUser('Session expired. Please log in again.');
-          return;
+          break; // Success, exit retry loop
+        } catch (error) {
+          attempt++;
+          if (error.name === 'AbortError') {
+            console.warn(`Sync attempt ${attempt} timed out for ${item.date}`);
+            if (attempt === maxRetries) {
+              offlineQueue.push(item);
+              await saveAllData();
+              notifyUser('Sync timed out. Data queued for retry.');
+            }
+          } else {
+            console.error(`Sync attempt ${attempt} failed for ${item.date}:`, error.message);
+            if (attempt === maxRetries) {
+              offlineQueue.push(item);
+              await saveAllData();
+              notifyUser('Sync failed. Data queued for retry.');
+            }
+          }
+          if (attempt < maxRetries) await sleep(2000 * attempt); // Exponential backoff
         }
-        throw new Error(`Sync failed: ${response.status}`);
       }
     }
 
@@ -465,8 +519,10 @@ async function syncData() {
     await saveAllData();
   } catch (error) {
     console.error('Sync error:', error.message);
-    const deltaData = { totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: new Date().toISOString().split('T')[0] };
-    if (deltaData.totalTime > 0 || deltaTabUsage.length > 0) {
+    const deltaTotalTime = totalTime - lastSyncedTotalTime;
+    const deltaTabUsage = calculateTabUsageDelta(tabUsage, lastSyncedTabUsage);
+    const deltaData = { totalTime: deltaTotalTime, tabs: deltaTabUsage, date: new Date().toISOString().split('T')[0] };
+    if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
       offlineQueue.push(deltaData);
       await saveAllData();
     }
@@ -474,9 +530,30 @@ async function syncData() {
   }
 }
 
+// Poll network status since window is not available
+function startNetworkPolling() {
+  setInterval(() => {
+    const wasOnline = isOnline;
+    isOnline = navigator.onLine;
+    if (wasOnline !== isOnline) {
+      if (isOnline) {
+        console.log('Back online, attempting sync');
+        setTimeout(syncData, 2000); // Delay to ensure network stability
+      } else {
+        console.log('Went offline');
+        notifyUser('Offline mode active.');
+      }
+    }
+  }, 5000); // Check every 5 seconds
+}
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'getScreenTime') {
+  if (request.action === 'ping') {
+    sendResponse({ status: 'success' });
+    return true; // Keep port open
+  } else if (request.action === 'getScreenTime') {
     sendResponse({ totalTime, tabUsage, isTracking, currentTabUrl });
+    return true;
   } else if (request.action === 'resetData') {
     resetDailyData(new Date().toISOString().split('T')[0]).then(() => sendResponse({ success: true }));
     return true;
@@ -485,11 +562,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   } else if (request.action === 'getCurrentStats') {
     sendResponse({ status: 'success', totalTime, tabUsage });
+    return true;
   } else if (request.action === 'getTrackingStatus') {
     sendResponse({ status: 'success', isTracking, currentTabUrl });
+    return true;
   } else if (request.action === 'openWebApp') {
     chrome.tabs.create({ url: 'http://localhost:5000' });
     sendResponse({ success: true });
+    return true;
   }
   return false;
 });

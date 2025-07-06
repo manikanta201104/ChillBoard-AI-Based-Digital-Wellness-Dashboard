@@ -29,7 +29,7 @@ const screenTimeSchema = new mongoose.Schema(
     },
     tabs: [tabsSchema],
   },
-  { timestamps: true }
+  { timestamps: true, versionKey: false } // Disable versioning to avoid VersionError
 );
 
 screenTimeSchema.index({ userId: 1, date: 1 }, { unique: true });
