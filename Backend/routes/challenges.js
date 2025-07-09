@@ -86,7 +86,7 @@ router.get('/', authMiddleware, async (req, res) => {
 
 router.post('/join', authMiddleware, async (req, res) => {
   const { challengeId } = req.body;
-  const userId = req.user.userId; // ✅ Always from token
+  const userId = req.user.userId;
 
   try {
     if (!challengeId) {
@@ -107,7 +107,6 @@ router.post('/join', authMiddleware, async (req, res) => {
         .json({ message: 'User already joined this challenge' });
     }
 
-    // ✅ Ensure we always push user.userId (not _id)
     challenge.participants.push({ userId, reduction: 0 });
     await challenge.save();
 
@@ -180,7 +179,6 @@ router.post('/progress', authMiddleware, async (req, res) => {
       )
     );
 
-    // Fetch baseline data
     const baselineData = await ScreenTime.aggregate([
       {
         $match: {
@@ -199,7 +197,6 @@ router.post('/progress', authMiddleware, async (req, res) => {
 
     let baselineTotalTime;
     if (!baselineData.length || baselineData[0].count < 7) {
-      // Fallback: Use the first day's totalTime as baseline for new users
       logger.info('Insufficient baseline data, using first day as baseline', { userId });
       const firstDayData = await ScreenTime.findOne({ userId, date: { $gte: startDate } })
         .sort({ date: 1 });
@@ -261,10 +258,19 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Challenge not found' });
     }
 
+    if (!challenge.participants || !Array.isArray(challenge.participants) || challenge.participants.length === 0) {
+      return res.status(400).json({ message: 'No participants in this challenge' });
+    }
+
+    // Sort by reduction in descending order and assign sequential ranks
+    let rank = 1;
     const rankedParticipants = challenge.participants
       .sort((a, b) => b.reduction - a.reduction)
-      .slice(0, 10)
-      .map((participant, index) => ({ rank: index + 1, ...participant }));
+      .map((participant, index) => ({
+        ...participant,
+        rank: index + 1, // Sequential rank based on sorted order
+      }))
+      .slice(0, 10);
 
     const allUserIds = rankedParticipants.map(p => p.userId);
 
@@ -333,10 +339,10 @@ export const updateProgress = async (req, res) => {
     if (!participant)
       return res.status(404).json({ message: 'User not in challenge' });
 
-    const initialTime = participant.initialScreenTime || totalTime; // Set initial if null
+    const initialTime = participant.initialScreenTime || totalTime;
     participant.initialScreenTime = initialTime;
     participant.currentScreenTime = totalTime;
-    participant.reduction = (initialTime - totalTime) / 3600; // Convert to hours
+    participant.reduction = (initialTime - totalTime) / 3600;
     await challenge.save();
 
     res

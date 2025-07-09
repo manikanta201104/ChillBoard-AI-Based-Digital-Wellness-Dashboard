@@ -10,12 +10,17 @@ const Challenges = () => {
   const [loading, setLoading] = useState(false);
   const userId = localStorage.getItem('userId');
 
-  const fetchLeaderboard = async (challengeId) => {
-    try {
-      const data = await getLeaderboard(challengeId);
-      setLeaderboard(data);
-    } catch (err) {
-      setError(err.message || 'Failed to fetch leaderboard');
+  const fetchLeaderboard = async (challengeId, retries = 3) => {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const data = await getLeaderboard(challengeId);
+        setLeaderboard(data);
+        if (error) setError(''); // Clear error on success
+        return;
+      } catch (err) {
+        setError(`Failed to fetch leaderboard (Attempt ${attempt}/${retries}): ${err.message}`);
+        if (attempt < retries) await new Promise(resolve => setTimeout(resolve, 2000)); // Retry after 2s
+      }
     }
   };
 
@@ -26,18 +31,20 @@ const Challenges = () => {
         const data = await getChallenges();
         setChallenges(data);
 
-        // Check which challenges the user has joined
         const joined = data.filter(challenge =>
           challenge.participants.some(p => p.userId === userId)
         ).map(challenge => challenge.challengeId);
         const joinedSet = new Set(joined);
         setJoinedChallenges(joinedSet);
 
-        if (joined.length > 0) {
-          const latestJoined = joined[0]; // Use the most recently joined challenge
-          setSelectedChallengeId(latestJoined);
-          await fetchLeaderboard(latestJoined);
-        }
+        const storedChallengeId = localStorage.getItem('selectedChallengeId');
+        const latestJoined = storedChallengeId && joinedSet.has(storedChallengeId)
+          ? storedChallengeId
+          : joined.length > 0
+          ? joined[0]
+          : null;
+        setSelectedChallengeId(latestJoined);
+        if (latestJoined) await fetchLeaderboard(latestJoined);
       } catch (err) {
         setError(err.message || 'Failed to fetch challenges');
       } finally {
@@ -48,6 +55,20 @@ const Challenges = () => {
     fetchChallenges();
   }, [userId]);
 
+  useEffect(() => {
+    if (selectedChallengeId) {
+      const pollLeaderboard = setInterval(async () => {
+        await fetchLeaderboard(selectedChallengeId);
+      }, 30000); // Poll every 30 seconds
+      fetchLeaderboard(selectedChallengeId); // Initial fetch
+      localStorage.setItem('selectedChallengeId', selectedChallengeId);
+      return () => clearInterval(pollLeaderboard);
+    } else {
+      setLeaderboard([]);
+      localStorage.removeItem('selectedChallengeId');
+    }
+  }, [selectedChallengeId]);
+
   const handleJoinChallenge = async (challengeId) => {
     setLoading(true);
     try {
@@ -57,9 +78,7 @@ const Challenges = () => {
       setSelectedChallengeId(challengeId);
       await fetchLeaderboard(challengeId);
       setError('Successfully joined challenge!');
-      // Store joined challenge in localStorage for persistence
-      const joinedList = Array.from(updatedJoined);
-      localStorage.setItem('joinedChallenges', JSON.stringify(joinedList));
+      localStorage.setItem('joinedChallenges', JSON.stringify(Array.from(updatedJoined)));
     } catch (err) {
       setError(err.message || 'Failed to join challenge');
     } finally {
@@ -82,13 +101,11 @@ const Challenges = () => {
     }
   };
 
-  // Load joined challenges from localStorage on mount
   useEffect(() => {
     const storedJoined = localStorage.getItem('joinedChallenges');
     if (storedJoined) {
       setJoinedChallenges(new Set(JSON.parse(storedJoined)));
     }
-    // Ensure userId is set if not already
     if (!userId) {
       getUserFromToken().then(id => {
         if (id) localStorage.setItem('userId', id);
