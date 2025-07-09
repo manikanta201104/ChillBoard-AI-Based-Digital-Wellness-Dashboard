@@ -176,8 +176,7 @@ const Dashboard = () => {
       } catch (err) {
         setError(err.message || 'Failed to fetch user data');
         setSpotifyToken('');
-        // Attempt to re-authenticate if token is missing or invalid
-        handleSpotifyConnect();
+        handleSpotifyConnect(); // Attempt re-authentication
       }
     };
 
@@ -559,12 +558,24 @@ const Dashboard = () => {
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
                       play={isPlaying}
-                      callback={state => {
+                      callback={async (state) => {
                         if (state.isPlaying) console.log('Playing:', state.track.name);
                         if (state.error) {
                           console.error('Playback error:', state.error);
-                          setError(`Playback failed: ${state.error.message}. Re-authenticating...`);
-                          handleSpotifyConnect();
+                          setError(`Playback failed: ${state.error.message}`);
+                          if (state.error.status === 401) {
+                            // Token expired, re-authenticate
+                            await handleSpotifyConnect();
+                            const userData = await getUser();
+                            setSpotifyToken(userData.spotifyToken.accessToken || '');
+                          } else if (state.error.status === 503) {
+                            // Network interruption, retry after delay
+                            setTimeout(async () => {
+                              const userData = await getUser();
+                              setSpotifyToken(userData.spotifyToken.accessToken || '');
+                              setError('Retrying playback...');
+                            }, 5000);
+                          }
                         }
                       }}
                       styles={{
