@@ -50,7 +50,22 @@ export const getRecommendations = async () => {
       Authorization: `Bearer ${token}`,
     },
   });
-  return response.data;
+  // Trigger POST if no recent recommendations (e.g., last 5 minutes)
+  const recommendations = response.data;
+  if (!recommendations.length || (Date.now() - new Date(recommendations[0].timestamp).getTime() > 5 * 60 * 1000)) {
+    await api.post('/recommendations', {}, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    const updatedResponse = await api.get('/recommendations', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return updatedResponse.data;
+  }
+  return recommendations;
 };
 
 export const updateRecommendation = async (recommendationId, accepted) => {

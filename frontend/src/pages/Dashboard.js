@@ -26,7 +26,7 @@ const Dashboard = () => {
   const [timerRunning, setTimerRunning] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
   const [spotifyToken, setSpotifyToken] = useState('');
-  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '' });
+  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '', offset: 0 }); // Added offset for playback position
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
@@ -36,6 +36,45 @@ const Dashboard = () => {
   const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
   const timerRef = useRef(null);
   const detectionIntervalRef = useRef(null);
+
+  // Fetch recommendations automatically based on latest screen time and mood
+  const fetchRecommendationsAutomatically = async () => {
+    try {
+      const latestScreenTime = screenTimeData.length > 0 ? screenTimeData[0] : null;
+      const latestMood = lastSavedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
+      if (latestScreenTime && latestMood) {
+        await getRecommendations(); // This will trigger the POST /recommendations internally if not cached
+        const updatedRecommendations = await getRecommendations();
+        setRecommendations(updatedRecommendations);
+        const latestRec = updatedRecommendations.length > 0 ? updatedRecommendations[0] : null;
+        if (latestRec && latestRec.type === 'music') {
+          const details = JSON.parse(latestRec.details);
+          setCurrentPlaylist(prev => ({ ...prev, id: details.playlistId, name: details.name }));
+        }
+      }
+    } catch (err) {
+      setError('Failed to fetch recommendations automatically');
+      console.error(err);
+    }
+  };
+
+  // Poll screen time for real-time updates
+  useEffect(() => {
+    const pollScreenTime = async () => {
+      const interval = setInterval(async () => {
+        try {
+          const data = await getScreenTime();
+          const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
+          setScreenTimeData(sortedData);
+          await fetchRecommendationsAutomatically(); // Trigger recommendations on screen time update
+        } catch (err) {
+          setError(err.message || 'Failed to poll screen time');
+        }
+      }, 60000); // Poll every minute
+      return () => clearInterval(interval);
+    };
+    pollScreenTime();
+  }, []);
 
   const detectEmotions = async () => {
     if (!videoRef.current || !webcamEnabled || !modelsLoaded) {
@@ -98,6 +137,7 @@ const Dashboard = () => {
             console.log('Mood sent:', moodToSend);
             setLastSavedMood(moodToSend);
             lastSentRef.current = { timestamp: now, mood: moodText, confidence };
+            await fetchRecommendationsAutomatically(); // Trigger recommendations on mood update
           } catch (err) {
             console.error('Error sending mood to backend:', err);
             setError('Failed to send mood data to backend.');
@@ -148,6 +188,7 @@ const Dashboard = () => {
         const data = await getScreenTime();
         const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
         setScreenTimeData(sortedData);
+        await fetchRecommendationsAutomatically(); // Initial fetch
       } catch (err) {
         setError(err.message || 'Failed to fetch screen time data');
       }
@@ -160,9 +201,7 @@ const Dashboard = () => {
         const latestRec = data.length > 0 ? data[0] : null;
         if (latestRec && latestRec.type === 'music') {
           const details = JSON.parse(latestRec.details);
-          setCurrentPlaylist({ id: details.playlistId, name: details.name });
-        } else {
-          setCurrentPlaylist({ id: '', name: '' });
+          setCurrentPlaylist(prev => ({ ...prev, id: details.playlistId, name: details.name }));
         }
       } catch (err) {
         setError(err.message || 'Failed to fetch recommendations');
@@ -335,6 +374,7 @@ const Dashboard = () => {
       setLastSavedMood(moodToSend);
       lastSentRef.current = { timestamp: Date.now(), mood: newMood, confidence: 1.0 };
       setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
+      await fetchRecommendationsAutomatically(); // Trigger recommendations on mood correction
     } catch (err) {
       console.error('Error saving corrected mood:', err);
       setError('Failed to save corrected mood');
@@ -392,6 +432,10 @@ const Dashboard = () => {
 
   const handlePlay = () => {
     setIsPlaying(true);
+    // Save current playback position to localStorage
+    const playbackState = localStorage.getItem('chillboardPlaybackState');
+    const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
+    setCurrentPlaylist(prev => ({ ...prev, offset }));
   };
 
   const handleSkipPlaylist = async () => {
@@ -421,10 +465,11 @@ const Dashboard = () => {
     try {
       const newPlaylist = await fetchNewPlaylist(mood, true);
       console.log('New playlist fetched:', newPlaylist);
-      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
+      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 }); // Reset offset on skip
       console.log('Current playlist updated to:', { id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
       setError('New playlist loaded!');
       setIsPlaying(false);
+      localStorage.removeItem('chillboardPlaybackState'); // Clear previous state on skip
     } catch (err) {
       setError(`Failed to fetch new playlist: ${err.message}. Attempting re-authentication...`);
       await handleSpotifyConnect(); // Trigger re-auth if fetch fails
@@ -470,6 +515,19 @@ const Dashboard = () => {
   };
 
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
+
+  // Persist playback state on unmount and page change
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (isPlaying && currentPlaylist.id) {
+        localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: currentPlaylist.offset, name: currentPlaylist.name }));
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [isPlaying, currentPlaylist]);
 
   return (
     <div className="min-h-screen bg-green-50 p-4 md:p-6">
@@ -558,8 +616,13 @@ const Dashboard = () => {
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
                       play={isPlaying}
+                      offset={currentPlaylist.offset} // Resume from last position
                       callback={async (state) => {
-                        if (state.isPlaying) console.log('Playing:', state.track.name);
+                        if (state.isPlaying) {
+                          console.log('Playing:', state.track.name);
+                          setCurrentPlaylist(prev => ({ ...prev, offset: state.progressMs / 1000 || 0 })); // Update offset in seconds
+                          localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: state.progressMs / 1000, name: currentPlaylist.name }));
+                        }
                         if (state.error) {
                           console.error('Playback error:', state.error);
                           setError(`Playback failed: ${state.error.message}`);
