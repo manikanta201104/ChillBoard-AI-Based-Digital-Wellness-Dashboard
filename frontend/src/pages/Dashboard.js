@@ -1,4 +1,4 @@
-/*global chrome*/
+/*global chrome */
 
 import React, { useEffect, useState, useRef } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
@@ -33,7 +33,7 @@ const Dashboard = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
-  const lastSentRef = useRef(0);
+  const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
   const timerRef = useRef(null);
   const detectionIntervalRef = useRef(null);
 
@@ -80,6 +80,9 @@ const Dashboard = () => {
 
         const moodText = correctedMood || dominantEmotion.mood;
         const confidence = dominantEmotion.confidence;
+        const now = Date.now();
+        const timeSinceLast = (now - lastSentRef.current.timestamp) / 1000;
+        const confidenceDrop = lastSentRef.current.confidence ? Math.abs(confidence - lastSentRef.current.confidence) : 0;
 
         if (confidence > 0.2) {
           setDetectedMood(`You seem ${moodText} (Confidence: ${(confidence * 100).toFixed(2)}%)`);
@@ -87,23 +90,20 @@ const Dashboard = () => {
           setDetectedMood('Low confidence in emotion detection');
         }
 
-        const now = Date.now();
-        const moodToSend = { mood: moodText, confidence };
-
-        if (now - lastSentRef.current >= 10000 && JSON.stringify(moodToSend) !== JSON.stringify(lastSavedMood)) {
+        if ((confidenceDrop > 0.2 || (timeSinceLast >= 30 && moodText !== lastSentRef.current.mood)) && now - lastSentRef.current.timestamp >= 5000) {
+          const moodToSend = { mood: moodText, confidence };
           try {
             console.log('Sending mood:', moodToSend);
             await saveMood(moodToSend);
             console.log('Mood sent:', moodToSend);
             setLastSavedMood(moodToSend);
-            lastSentRef.current = now;
+            lastSentRef.current = { timestamp: now, mood: moodText, confidence };
           } catch (err) {
             console.error('Error sending mood to backend:', err);
             setError('Failed to send mood data to backend.');
-            lastSentRef.current = now;
           }
         } else {
-          console.log('Mood not sent: time threshold not met or mood unchanged');
+          console.log('Mood not sent: confidence drop < 20% or < 30s persistence or < 5s since last');
         }
 
         setDetectionAttempts(0);
@@ -245,7 +245,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(detectEmotions, 500);
+      detectionIntervalRef.current = setInterval(detectEmotions, 5000); // 5-second interval
 
       return () => {
         if (detectionIntervalRef.current) {
@@ -333,7 +333,7 @@ const Dashboard = () => {
       await saveMood(moodToSend);
       console.log('Corrected mood sent:', moodToSend);
       setLastSavedMood(moodToSend);
-      lastSentRef.current = Date.now();
+      lastSentRef.current = { timestamp: Date.now(), mood: newMood, confidence: 1.0 };
       setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
     } catch (err) {
       console.error('Error saving corrected mood:', err);
@@ -564,12 +564,10 @@ const Dashboard = () => {
                           console.error('Playback error:', state.error);
                           setError(`Playback failed: ${state.error.message}`);
                           if (state.error.status === 401) {
-                            // Token expired, re-authenticate
                             await handleSpotifyConnect();
                             const userData = await getUser();
                             setSpotifyToken(userData.spotifyToken.accessToken || '');
                           } else if (state.error.status === 503) {
-                            // Network interruption, retry after delay
                             setTimeout(async () => {
                               const userData = await getUser();
                               setSpotifyToken(userData.spotifyToken.accessToken || '');

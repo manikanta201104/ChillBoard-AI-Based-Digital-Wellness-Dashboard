@@ -18,23 +18,31 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid confidence value' });
     }
 
-    // Update or create a single document for the user
-    const updatedMood = await Mood.findOneAndUpdate(
-      { userId },
-      { mood, confidence, timestamp: new Date() },
-      { upsert: true, new: true, runValidators: true }
-    );
+    const lastMood = await Mood.findOne({ userId });
+    const confidenceDrop = lastMood ? Math.abs(confidence - lastMood.confidence) : 0;
+    const timeSinceLast = lastMood ? (Date.now() - lastMood.timestamp) / 1000 : 30;
 
-    logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
+    if (confidenceDrop > 0.2 || (timeSinceLast >= 30 && mood !== lastMood?.mood)) {
+      const updatedMood = await Mood.findOneAndUpdate(
+        { userId },
+        { mood, confidence, timestamp: new Date() },
+        { upsert: true, new: true, runValidators: true }
+      );
 
-    // Simulate TriggerLink for recommendations (Day 15)
-    const triggerLink = {
-      fromSource: 'mood',
-      data: { mood, confidence, timestamp: new Date().toISOString() },
-    };
-    logger.info('TriggerLink generated', triggerLink);
+      logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
 
-    res.status(200).json({ message: 'Mood updated', mood: updatedMood });
+      // Simulate TriggerLink for recommendations (Day 15)
+      const triggerLink = {
+        fromSource: 'mood',
+        data: { mood, confidence, timestamp: new Date().toISOString() },
+      };
+      logger.info('TriggerLink generated', triggerLink);
+
+      res.status(200).json({ message: 'Mood updated', mood: updatedMood });
+    } else {
+      logger.info('No significant mood change, skipping update', { userId, mood, confidence });
+      res.status(204).send('No significant change');
+    }
   } catch (error) {
     logger.error('Error updating mood:', error);
     res.status(500).json({ message: 'Server error' });
