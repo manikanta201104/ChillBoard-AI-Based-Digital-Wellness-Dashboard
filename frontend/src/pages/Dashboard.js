@@ -90,7 +90,7 @@ const Dashboard = () => {
           setDetectedMood('Low confidence in emotion detection');
         }
 
-        if ((confidenceDrop > 0.2 || (timeSinceLast >= 30 && moodText !== lastSentRef.current.mood)) && now - lastSentRef.current.timestamp >= 5000) {
+        if ((confidenceDrop > 0.2 || (timeSinceLast >= 30 && moodText !== lastSentRef.current.mood)) && now - lastSentRef.current.timestamp >= 10000) {
           const moodToSend = { mood: moodText, confidence };
           try {
             console.log('Sending mood:', moodToSend);
@@ -103,7 +103,7 @@ const Dashboard = () => {
             setError('Failed to send mood data to backend.');
           }
         } else {
-          console.log('Mood not sent: confidence drop < 20% or < 30s persistence or < 5s since last');
+          console.log('Mood not sent: confidence drop < 20% or < 30s persistence or < 10s since last');
         }
 
         setDetectionAttempts(0);
@@ -245,7 +245,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(detectEmotions, 5000); // 5-second interval
+      detectionIntervalRef.current = setInterval(detectEmotions, 10000); // Adjusted to 10 seconds
 
       return () => {
         if (detectionIntervalRef.current) {
