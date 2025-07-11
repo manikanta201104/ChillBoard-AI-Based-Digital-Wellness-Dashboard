@@ -107,7 +107,7 @@ router.post('/join', authMiddleware, async (req, res) => {
         .json({ message: 'User already joined this challenge' });
     }
 
-    challenge.participants.push({ userId, reduction: 0 });
+    challenge.participants.push({ userId, reduction: 0, lastUpdate: Date.now() });
     await challenge.save();
 
     logger.info('User joined challenge', { challengeId, userId });
@@ -124,7 +124,7 @@ router.post('/join', authMiddleware, async (req, res) => {
 });
 
 router.post('/progress', authMiddleware, async (req, res) => {
-  const { challengeId } = req.body;
+  const { challengeId, manualTrigger = false } = req.body;
   const userId = req.user.userId;
 
   try {
@@ -228,15 +228,24 @@ router.post('/progress', authMiddleware, async (req, res) => {
     );
     const totalReduction = participant.reduction / 3600 + dailyReduction;
     const maxReduction = challenge.goal / 60 * challenge.duration;
-    participant.reduction = Math.min(totalReduction, maxReduction) * 3600;
+    const newReduction = Math.min(totalReduction, maxReduction) * 3600;
 
-    await challenge.save();
-    res
-      .status(200)
-      .json({
-        message: 'Progress updated',
-        reduction: participant.reduction / 3600,
-      });
+    // Update only if 1 hour has passed or manually triggered
+    if (now - participant.lastUpdate >= 3600000 || manualTrigger) {
+      participant.reduction = newReduction;
+      participant.lastUpdate = now;
+      await challenge.save();
+      logger.info('Progress updated', { challengeId, userId, reduction: participant.reduction / 3600, timestamp: now });
+      res
+        .status(200)
+        .json({
+          message: 'Progress updated',
+          reduction: participant.reduction / 3600,
+        });
+    } else {
+      logger.info('Progress update skipped, within 1-hour interval', { challengeId, userId, lastUpdate: participant.lastUpdate, now });
+      res.status(204).send('No update needed within hour');
+    }
   } catch (err) {
     logger.error('Error updating progress', {
       error: err.message,

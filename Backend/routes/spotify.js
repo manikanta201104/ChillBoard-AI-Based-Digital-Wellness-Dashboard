@@ -154,7 +154,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
-    // Only check cache if not skipping
+    // Check cache only if not skipping and mood has changed
     let cachedPlaylist = null;
     if (!skip) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -169,6 +169,13 @@ router.get('/playlist', authMiddleware, async (req, res) => {
         logger.info('Returning cached playlist', { userId, playlistId: cachedPlaylist.spotifyPlaylistId });
         return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
       }
+    }
+
+    // Fetch new playlist only if mood changed or no cache
+    const lastMood = await Playlist.findOne({ userId }).sort({ createdAt: -1 }).select('mood');
+    if (cachedPlaylist && lastMood && lastMood.mood === (moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default)) {
+      logger.info('No mood change detected, returning cached playlist', { userId, mood });
+      return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
     }
 
     spotifyApi.setAccessToken(currentAccessToken);
