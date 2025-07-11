@@ -177,7 +177,7 @@ async function fetchServerData(jwt, date, retries = 3) {
       const response = await fetch('http://localhost:5000/screen-time', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${jwt}` },
-        signal: AbortSignal.timeout(20000) // Increased to 20s
+        signal: AbortSignal.timeout(20000)
       });
       if (!response.ok) {
         if (response.status === 401 && attempt === 1) {
@@ -222,7 +222,7 @@ async function fetchServerData(jwt, date, retries = 3) {
           return false;
         }
       }
-      await sleep(1000 * attempt); // Exponential backoff
+      await sleep(1000 * attempt);
     }
   }
 }
@@ -413,7 +413,7 @@ chrome.tabs.onRemoved.addListener(tabId => {
   }
 });
 
-const SYNC_INTERVAL_MINUTES = 5;
+const SYNC_INTERVAL_MINUTES = 10; // Updated from 5 to 10 minutes
 chrome.alarms.create('syncData', { periodInMinutes: SYNC_INTERVAL_MINUTES });
 
 chrome.alarms.onAlarm.addListener(alarm => {
@@ -443,15 +443,16 @@ async function syncData(maxRetries = 3) {
     }
 
     const deltaTotalTime = totalTime - lastSyncedTotalTime;
-    const deltaTabUsage = calculateTabUsageDelta(tabUsage, lastSyncedTabUsage);
+    // Batch tab usage by aggregating into a single entry per URL
+    const batchedTabUsage = combineTabUsageByUrl(calculateTabUsageDelta(tabUsage, lastSyncedTabUsage));
     const dataToSync = [
       ...offlineQueue,
-      ...(deltaTotalTime > 0 || deltaTabUsage.length > 0 ? [{ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate }] : [])
+      ...(deltaTotalTime > 0 || batchedTabUsage.length > 0 ? [{ totalTime: deltaTotalTime, tabs: batchedTabUsage, date: currentDate }] : [])
     ].filter(item => item.totalTime > 0 || item.tabs.length > 0);
 
     if (!isOnline) {
-      if (deltaTotalTime > 0 || deltaTabUsage.length > 0) {
-        offlineQueue.push({ totalTime: deltaTotalTime, tabs: deltaTabUsage, date: currentDate });
+      if (deltaTotalTime > 0 || batchedTabUsage.length > 0) {
+        offlineQueue.push({ totalTime: deltaTotalTime, tabs: batchedTabUsage, date: currentDate });
         await saveAllData();
       }
       notifyUser('Offline. Data will sync when online.');
@@ -468,7 +469,7 @@ async function syncData(maxRetries = 3) {
       while (attempt < maxRetries) {
         try {
           const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 20000); // 20s timeout
+          const timeoutId = setTimeout(() => controller.abort(), 20000);
           const response = await fetch('http://localhost:5000/screen-time', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
@@ -490,7 +491,7 @@ async function syncData(maxRetries = 3) {
             }
             throw new Error(`Sync failed: ${response.status} - ${response.statusText}`);
           }
-          break; // Success, exit retry loop
+          break;
         } catch (error) {
           attempt++;
           if (error.name === 'AbortError') {
@@ -508,7 +509,7 @@ async function syncData(maxRetries = 3) {
               notifyUser('Sync failed. Data queued for retry.');
             }
           }
-          if (attempt < maxRetries) await sleep(2000 * attempt); // Exponential backoff
+          if (attempt < maxRetries) await sleep(2000 * attempt);
         }
       }
     }
@@ -520,8 +521,8 @@ async function syncData(maxRetries = 3) {
   } catch (error) {
     console.error('Sync error:', error.message);
     const deltaTotalTime = totalTime - lastSyncedTotalTime;
-    const deltaTabUsage = calculateTabUsageDelta(tabUsage, lastSyncedTabUsage);
-    const deltaData = { totalTime: deltaTotalTime, tabs: deltaTabUsage, date: new Date().toISOString().split('T')[0] };
+    const batchedTabUsage = combineTabUsageByUrl(calculateTabUsageDelta(tabUsage, lastSyncedTabUsage));
+    const deltaData = { totalTime: deltaTotalTime, tabs: batchedTabUsage, date: new Date().toISOString().split('T')[0] };
     if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
       offlineQueue.push(deltaData);
       await saveAllData();
@@ -538,19 +539,19 @@ function startNetworkPolling() {
     if (wasOnline !== isOnline) {
       if (isOnline) {
         console.log('Back online, attempting sync');
-        setTimeout(syncData, 2000); // Delay to ensure network stability
+        setTimeout(syncData, 2000);
       } else {
         console.log('Went offline');
         notifyUser('Offline mode active.');
       }
     }
-  }, 5000); // Check every 5 seconds
+  }, 5000);
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'ping') {
     sendResponse({ status: 'success' });
-    return true; // Keep port open
+    return true;
   } else if (request.action === 'getScreenTime') {
     sendResponse({ totalTime, tabUsage, isTracking, currentTabUrl });
     return true;
@@ -579,11 +580,11 @@ initializeStorage();
 // Focus-based idle detection with error handling
 function setupIdleDetection() {
   if (typeof chrome.idle !== 'undefined' && chrome.idle.setDetectionInterval) {
-    chrome.idle.setDetectionInterval(30); // Check every 30 seconds
+    chrome.idle.setDetectionInterval(30);
     chrome.idle.onStateChanged.addListener(state => {
       console.log('Idle state changed:', state);
       if (state === 'locked' || state === 'idle') stopTracking();
-      else if (currentTabId && currentTabUrl) setTimeout(checkFocus, 100); // Resume on active state
+      else if (currentTabId && currentTabUrl) setTimeout(checkFocus, 100);
     });
   } else {
     console.warn('chrome.idle API not available, focus-based tracking only.');
