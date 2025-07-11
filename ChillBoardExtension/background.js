@@ -413,8 +413,8 @@ chrome.tabs.onRemoved.addListener(tabId => {
   }
 });
 
-const SYNC_INTERVAL_MINUTES = 10; // Updated from 5 to 10 minutes
-chrome.alarms.create('syncData', { periodInMinutes: SYNC_INTERVAL_MINUTES });
+const SYNC_INTERVAL_MS = 600000; // 10 minutes in milliseconds
+chrome.alarms.create('syncData', { periodInMinutes: 10 }); // Consistent with 600,000 ms
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'syncData') syncData();
