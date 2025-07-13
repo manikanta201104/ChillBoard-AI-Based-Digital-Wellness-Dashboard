@@ -20,7 +20,14 @@ const AuthForm = ({ type, onSuccess }) => {
         ? await signup(userData)
         : await login(userData);
 
+      // Store tokens and userId in localStorage
       localStorage.setItem('jwt', response.token);
+      localStorage.setItem('refreshToken', response.refreshToken);
+      localStorage.setItem('userId', response.userId);
+
+      // Send message to trigger state reset in other components
+      window.postMessage({ type: 'loginSuccess', clearChallengeData: response.clearChallengeData || false }, '*');
+
       onSuccess();
     } catch (err) {
       setError(err.response?.data?.message || 'An error occurred');

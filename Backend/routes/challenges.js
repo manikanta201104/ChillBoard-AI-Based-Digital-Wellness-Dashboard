@@ -98,22 +98,17 @@ router.post('/join', authMiddleware, async (req, res) => {
       return res.status(404).json({ message: 'Challenge not found' });
     }
 
-    const alreadyJoined = challenge.participants.some(
-      p => p.userId === userId
-    );
+    logger.info('Checking join status', { challengeId, userId, participants: challenge.participants.map(p => p.userId) });
+    const alreadyJoined = challenge.participants.some(p => p.userId === userId);
     if (alreadyJoined) {
-      return res
-        .status(400)
-        .json({ message: 'User already joined this challenge' });
+      return res.status(400).json({ message: 'User already joined this challenge' });
     }
 
     challenge.participants.push({ userId, reduction: 0, lastUpdate: Date.now() });
     await challenge.save();
 
     logger.info('User joined challenge', { challengeId, userId });
-    res
-      .status(200)
-      .json({ message: 'Successfully joined challenge', challenge });
+    res.status(200).json({ message: 'Successfully joined challenge', challenge });
   } catch (err) {
     logger.error('Error joining challenge', {
       error: err.message,
@@ -139,9 +134,7 @@ router.post('/progress', authMiddleware, async (req, res) => {
 
     const participant = challenge.participants.find(p => p.userId === userId);
     if (!participant) {
-      return res
-        .status(403)
-        .json({ message: 'User not participating in this challenge' });
+      return res.status(403).json({ message: 'User not participating in this challenge' });
     }
 
     const now = new Date();
@@ -230,18 +223,15 @@ router.post('/progress', authMiddleware, async (req, res) => {
     const maxReduction = challenge.goal / 60 * challenge.duration;
     const newReduction = Math.min(totalReduction, maxReduction) * 3600;
 
-    // Update only if 1 hour has passed or manually triggered
     if (now - participant.lastUpdate >= 3600000 || manualTrigger) {
       participant.reduction = newReduction;
       participant.lastUpdate = now;
       await challenge.save();
       logger.info('Progress updated', { challengeId, userId, reduction: participant.reduction / 3600, timestamp: now });
-      res
-        .status(200)
-        .json({
-          message: 'Progress updated',
-          reduction: participant.reduction / 3600,
-        });
+      res.status(200).json({
+        message: 'Progress updated',
+        reduction: participant.reduction / 3600,
+      });
     } else {
       logger.info('Progress update skipped, within 1-hour interval', { challengeId, userId, lastUpdate: participant.lastUpdate, now });
       res.status(204).send('No update needed within hour');
@@ -271,19 +261,17 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'No participants in this challenge' });
     }
 
-    // Sort by reduction in descending order and assign sequential ranks
     let rank = 1;
     const rankedParticipants = challenge.participants
       .sort((a, b) => b.reduction - a.reduction)
       .map((participant, index) => ({
         ...participant,
-        rank: index + 1, // Sequential rank based on sorted order
+        rank: index + 1,
       }))
       .slice(0, 10);
 
     const allUserIds = rankedParticipants.map(p => p.userId);
 
-    // Fetch both userId and _id for matching flexibility
     const users = await User.find(
       {
         $or: [

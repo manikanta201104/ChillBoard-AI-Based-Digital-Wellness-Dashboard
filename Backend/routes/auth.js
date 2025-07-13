@@ -39,7 +39,7 @@ router.post('/signup', async (req, res) => {
     await user.save();
 
     logger.info('User signed up successfully', { email });
-    res.status(201).json({ token: accessToken, refreshToken });
+    res.status(201).json({ token: accessToken, refreshToken, userId });
   } catch (error) {
     logger.error('Error during signup:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -72,8 +72,14 @@ router.post('/login', async (req, res) => {
     };
     await user.save();
 
-    logger.info('User logged in successfully', { email });
-    res.status(200).json({ token: accessToken, refreshToken });
+    // Signal frontend to clear old challenge data and set new userId
+    logger.info('User logged in successfully', { email, userId: user.userId });
+    res.status(200).json({ 
+      token: accessToken, 
+      refreshToken, 
+      userId: user.userId,
+      clearChallengeData: true // Flag to trigger state reset on frontend
+    });
   } catch (error) {
     logger.error('Error during login:', error);
     res.status(500).json({ message: 'Internal server error' });

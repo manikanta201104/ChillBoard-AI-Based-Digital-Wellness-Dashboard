@@ -24,42 +24,51 @@ const Challenges = () => {
     }
   };
 
+  const fetchChallenges = async () => {
+    setLoading(true);
+    try {
+      const data = await getChallenges();
+      setChallenges(data);
+
+      const joined = data.filter(challenge =>
+        challenge.participants.some(p => p.userId === userId)
+      ).map(challenge => challenge.challengeId);
+      const joinedSet = new Set(joined);
+      setJoinedChallenges(joinedSet);
+
+      const storedChallengeId = localStorage.getItem('selectedChallengeId');
+      const latestJoined = storedChallengeId && joinedSet.has(storedChallengeId)
+        ? storedChallengeId
+        : joined.length > 0
+        ? joined[0]
+        : null;
+      setSelectedChallengeId(latestJoined);
+      if (latestJoined) await fetchLeaderboard(latestJoined);
+    } catch (err) {
+      setError(err.message || 'Failed to fetch challenges');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Poll challenges every 3 seconds
   useEffect(() => {
-    const fetchChallenges = async () => {
-      setLoading(true);
-      try {
-        const data = await getChallenges();
-        setChallenges(data);
+    const pollChallenges = setInterval(() => {
+      if (userId) fetchChallenges();
+    }, 3000); // 3 seconds interval
 
-        const joined = data.filter(challenge =>
-          challenge.participants.some(p => p.userId === userId)
-        ).map(challenge => challenge.challengeId);
-        const joinedSet = new Set(joined);
-        setJoinedChallenges(joinedSet);
+    // Initial fetch
+    if (userId) fetchChallenges();
 
-        const storedChallengeId = localStorage.getItem('selectedChallengeId');
-        const latestJoined = storedChallengeId && joinedSet.has(storedChallengeId)
-          ? storedChallengeId
-          : joined.length > 0
-          ? joined[0]
-          : null;
-        setSelectedChallengeId(latestJoined);
-        if (latestJoined) await fetchLeaderboard(latestJoined);
-      } catch (err) {
-        setError(err.message || 'Failed to fetch challenges');
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchChallenges();
+    return () => clearInterval(pollChallenges); // Cleanup interval on unmount
   }, [userId]);
 
+  // Poll leaderboard every 3 seconds when a challenge is selected
   useEffect(() => {
     if (selectedChallengeId) {
       const pollLeaderboard = setInterval(async () => {
         await fetchLeaderboard(selectedChallengeId);
-      }, 30000); // Poll every 30 seconds
+      }, 3000); // 3 seconds interval
       fetchLeaderboard(selectedChallengeId); // Initial fetch
       localStorage.setItem('selectedChallengeId', selectedChallengeId);
       return () => clearInterval(pollLeaderboard);

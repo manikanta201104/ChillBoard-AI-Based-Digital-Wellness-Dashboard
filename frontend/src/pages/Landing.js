@@ -6,7 +6,7 @@ const Landing = () => {
 
   const handleAuthSuccess = () => {
     setShowForm(null);
-    window.location.href = '/dashboard';
+    window.location.href = '/dashboard'; // Redirect to dashboard after success
   };
 
   return (
