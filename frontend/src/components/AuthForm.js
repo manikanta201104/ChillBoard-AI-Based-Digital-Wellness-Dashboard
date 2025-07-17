@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { signup, login } from '../utils/api';
+import { toast } from 'react-toastify';
 
 const AuthForm = ({ type, onSuccess }) => {
   const [email, setEmail] = useState('');
@@ -28,9 +29,29 @@ const AuthForm = ({ type, onSuccess }) => {
       // Send message to trigger state reset in other components
       window.postMessage({ type: 'loginSuccess', clearChallengeData: response.clearChallengeData || false }, '*');
 
+      // Show success toast
+      toast.success(`${type === 'signup' ? 'Sign Up' : 'Login'} successful!`, {
+        position: 'top-right',
+        autoClose: 3000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
+
       onSuccess();
     } catch (err) {
-      setError(err.response?.data?.message || 'An error occurred');
+      const errorMessage = err.response?.data?.message || 'An error occurred';
+      setError(errorMessage);
+      // Show error toast
+      toast.error(errorMessage, {
+        position: 'top-right',
+        autoClose: 3000,
+        hideProgressBar: false,
+        closeOnClick: true,
+        pauseOnHover: true,
+        draggable: true,
+      });
     }
   };
 

@@ -1,3 +1,4 @@
+
 import express from 'express';
 import SpotifyWebApi from 'spotify-web-api-node';
 import { logger } from '../index.js';
@@ -154,7 +155,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       logger.info('Token still valid', { userId, tokenExpiry });
     }
 
-    // Check cache only if not skipping and mood has changed
+    // Invalidate cache when skipping to ensure a new playlist
     let cachedPlaylist = null;
     if (!skip) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -163,7 +164,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
         mood: moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default,
         createdAt: { $gte: twentyFourHoursAgo },
         saved: { $ne: true }
-      });
+      }).sort({ createdAt: -1 });
 
       if (cachedPlaylist) {
         logger.info('Returning cached playlist', { userId, playlistId: cachedPlaylist.spotifyPlaylistId });
@@ -171,58 +172,64 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       }
     }
 
-    // Fetch new playlist only if mood changed or no cache
-    const lastMood = await Playlist.findOne({ userId }).sort({ createdAt: -1 }).select('mood');
-    if (cachedPlaylist && lastMood && lastMood.mood === (moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default)) {
-      logger.info('No mood change detected, returning cached playlist', { userId, mood });
-      return res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
-    }
+    // Always fetch a new playlist when skipping
+    if (skip || !cachedPlaylist) {
+      spotifyApi.setAccessToken(currentAccessToken);
 
-    spotifyApi.setAccessToken(currentAccessToken);
+      const category = moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default;
 
-    const category = moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default;
-
-    let playlists;
-    try {
-      playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
-      logger.info('Spotify API response', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
-    } catch (searchErr) {
-      logger.error('Spotify API error', { error: searchErr.message, stack: searchErr.stack, statusCode: searchErr.statusCode });
-      throw searchErr;
-    }
-
-    if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
-      return res.status(404).json({ message: 'No playlists found for this mood' });
-    }
-
-    const availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
-    if (availablePlaylists.length === 0) {
-      logger.warn('No new playlists available, forcing new search');
-      playlists = await spotifyApi.searchPlaylists(`category:${category} calm`, { limit: 10 });
-      logger.info('Spotify API response (retry)', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
-      if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
-        return res.status(404).json({ message: 'No new playlists available after retry' });
+      let playlists;
+      try {
+        playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
+        logger.info('Spotify API response', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
+      } catch (searchErr) {
+        logger.error('Spotify API error', { error: searchErr.message, stack: searchErr.stack, statusCode: searchErr.statusCode });
+        throw searchErr;
       }
-      availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+
+      if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
+        return res.status(404).json({ message: 'No playlists found for this mood' });
+      }
+
+      const availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+      if (availablePlaylists.length === 0 && !skip) {
+        logger.warn('No new playlists available, forcing new search');
+        playlists = await spotifyApi.searchPlaylists(`category:${category} calm`, { limit: 10 });
+        logger.info('Spotify API response (retry)', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
+        if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
+          return res.status(404).json({ message: 'No new playlists available after retry' });
+        }
+        availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+      }
+
+      const playlist = availablePlaylists[Math.floor(Math.random() * availablePlaylists.length)];
+      const response = { spotifyPlaylistId: playlist.id, name: playlist.name, mood: mood.toLowerCase() };
+
+      const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
+      if (!existingPlaylist) {
+        const newPlaylist = new Playlist({
+          userId,
+          spotifyPlaylistId: playlist.id,
+          name: playlist.name,
+          mood: category,
+          saved: false,
+        });
+        await newPlaylist.save();
+        logger.info('New playlist saved', { userId, playlistId: playlist.id });
+      } else if (skip) {
+        // Update existing playlist to mark it as used and reset cache
+        await Playlist.findOneAndUpdate(
+          { spotifyPlaylistId: playlist.id },
+          { createdAt: new Date(), saved: false },
+          { new: true }
+        );
+      }
+
+      res.status(200).json(response);
+    } else {
+      logger.info('No mood change detected, returning cached playlist', { userId, mood });
+      res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
     }
-
-    const playlist = availablePlaylists[Math.floor(Math.random() * availablePlaylists.length)];
-    const response = { spotifyPlaylistId: playlist.id, name: playlist.name, mood: mood.toLowerCase() };
-
-    const existingPlaylist = await Playlist.findOne({ spotifyPlaylistId: playlist.id });
-    if (!existingPlaylist) {
-      const newPlaylist = new Playlist({
-        userId,
-        spotifyPlaylistId: playlist.id,
-        name: playlist.name,
-        mood: category,
-        saved: false,
-      });
-      await newPlaylist.save();
-      logger.info('New playlist saved', { userId, playlistId: playlist.id });
-    }
-
-    res.status(200).json(response);
   } catch (err) {
     logger.error('Error fetching playlist', { error: err.message, stack: err.stack, statusCode: err.statusCode });
     res.status(500).json({ message: 'Server error', error: err.message });

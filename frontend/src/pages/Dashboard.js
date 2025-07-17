@@ -1,3 +1,4 @@
+
 /*global chrome */
 
 import React, { useEffect, useState, useRef } from 'react';
@@ -6,6 +7,8 @@ import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScal
 import * as faceapi from 'face-api.js';
 import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser, savePlaylist, fetchNewPlaylist, getLatestMood, getLeaderboard, getChallenges } from '../utils/api';
 import SpotifyPlayer from 'react-spotify-web-playback';
+import { ToastContainer, toast } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
 
@@ -26,7 +29,7 @@ const Dashboard = () => {
   const [timerRunning, setTimerRunning] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
   const [spotifyToken, setSpotifyToken] = useState('');
-  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '', offset: 0 }); // Added offset for playback position
+  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '', offset: 0 });
   const [modelsLoaded, setModelsLoaded] = useState(false);
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
@@ -37,15 +40,35 @@ const Dashboard = () => {
   const timerRef = useRef(null);
   const detectionIntervalRef = useRef(null);
 
+  // Helper function to show toast notifications
+  const showToast = (message, type = 'success') => {
+    const options = {
+      position: 'top-right',
+      autoClose: 3000,
+      hideProgressBar: false,
+      closeOnClick: true,
+      pauseOnHover: true,
+      draggable: true,
+    };
+    if (type === 'success') {
+      toast.success(message, options);
+    } else if (type === 'error') {
+      toast.error(message, options);
+    } else {
+      toast.info(message, options);
+    }
+  };
+
   // Fetch recommendations automatically based on latest screen time and mood
   const fetchRecommendationsAutomatically = async () => {
     try {
       const latestScreenTime = screenTimeData.length > 0 ? screenTimeData[0] : null;
       const latestMood = lastSavedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
       if (latestScreenTime && latestMood) {
-        await getRecommendations(); // This will trigger the POST /recommendations internally if not cached
+        await getRecommendations();
         const updatedRecommendations = await getRecommendations();
         setRecommendations(updatedRecommendations);
+        showToast('Recommendations fetched successfully!');
         const latestRec = updatedRecommendations.length > 0 ? updatedRecommendations[0] : null;
         if (latestRec && latestRec.type === 'music') {
           const details = JSON.parse(latestRec.details);
@@ -54,6 +77,7 @@ const Dashboard = () => {
       }
     } catch (err) {
       setError('Failed to fetch recommendations automatically');
+      showToast('Failed to fetch recommendations automatically', 'error');
       console.error(err);
     }
   };
@@ -66,11 +90,13 @@ const Dashboard = () => {
           const data = await getScreenTime();
           const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
           setScreenTimeData(sortedData);
-          await fetchRecommendationsAutomatically(); // Trigger recommendations on screen time update
+          showToast('Screen time data updated!');
+          await fetchRecommendationsAutomatically();
         } catch (err) {
           setError(err.message || 'Failed to poll screen time');
+          showToast(err.message || 'Failed to poll screen time', 'error');
         }
-      }, 60000); // Poll every minute
+      }, 60000);
       return () => clearInterval(interval);
     };
     pollScreenTime();
@@ -84,6 +110,7 @@ const Dashboard = () => {
         modelsLoaded,
       });
       setDetectedMood('Emotion detection not ready. Check webcam and model loading.');
+      showToast('Emotion detection not ready', 'error');
       return;
     }
 
@@ -127,6 +154,7 @@ const Dashboard = () => {
           setDetectedMood(`You seem ${moodText} (Confidence: ${(confidence * 100).toFixed(2)}%)`);
         } else {
           setDetectedMood('Low confidence in emotion detection');
+          showToast('Low confidence in emotion detection', 'error');
         }
 
         if ((confidenceDrop > 0.2 || (timeSinceLast >= 30 && moodText !== lastSentRef.current.mood)) && now - lastSentRef.current.timestamp >= 10000) {
@@ -137,10 +165,12 @@ const Dashboard = () => {
             console.log('Mood sent:', moodToSend);
             setLastSavedMood(moodToSend);
             lastSentRef.current = { timestamp: now, mood: moodText, confidence };
-            await fetchRecommendationsAutomatically(); // Trigger recommendations on mood update
+            showToast(`Mood ${moodText} saved successfully!`);
+            await fetchRecommendationsAutomatically();
           } catch (err) {
             console.error('Error sending mood to backend:', err);
             setError('Failed to send mood data to backend.');
+            showToast('Failed to send mood data', 'error');
           }
         } else {
           console.log('Mood not sent: confidence drop < 20% or < 30s persistence or < 10s since last');
@@ -150,14 +180,17 @@ const Dashboard = () => {
       } else {
         console.log('No face detected');
         setDetectedMood('No face detected. Please center your face in the frame.');
+        showToast('No face detected', 'error');
 
         if (detectionAttempts >= 10) {
           setDetectedMood('Still no face detected. Ensure good lighting and face the camera directly.');
+          showToast('Still no face detected', 'error');
         }
       }
     } catch (err) {
       console.error('Error during emotion detection:', err);
       setDetectedMood('Error detecting emotions');
+      showToast('Error detecting emotions', 'error');
     }
   };
 
@@ -171,11 +204,14 @@ const Dashboard = () => {
       if (joined) {
         const data = await getLeaderboard(joined.challengeId);
         setLeaderboard(data.slice(0, 3));
+        showToast('Leaderboard fetched successfully!');
       } else {
         setLeaderboard([]);
+        showToast('No leaderboard data available', 'info');
       }
     } catch (err) {
       setError(err.message || 'Failed to fetch leaderboard');
+      showToast(err.message || 'Failed to fetch leaderboard', 'error');
       setLeaderboard([]);
     } finally {
       setLeaderboardLoading(false);
@@ -188,9 +224,11 @@ const Dashboard = () => {
         const data = await getScreenTime();
         const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
         setScreenTimeData(sortedData);
-        await fetchRecommendationsAutomatically(); // Initial fetch
+        showToast('Screen time data fetched successfully!');
+        await fetchRecommendationsAutomatically();
       } catch (err) {
         setError(err.message || 'Failed to fetch screen time data');
+        showToast(err.message || 'Failed to fetch screen time data', 'error');
       }
     };
 
@@ -198,6 +236,7 @@ const Dashboard = () => {
       try {
         const data = await getRecommendations();
         setRecommendations(data);
+        showToast('Recommendations fetched successfully!');
         const latestRec = data.length > 0 ? data[0] : null;
         if (latestRec && latestRec.type === 'music') {
           const details = JSON.parse(latestRec.details);
@@ -205,6 +244,7 @@ const Dashboard = () => {
         }
       } catch (err) {
         setError(err.message || 'Failed to fetch recommendations');
+        showToast(err.message || 'Failed to fetch recommendations', 'error');
       }
     };
 
@@ -212,10 +252,12 @@ const Dashboard = () => {
       try {
         const userData = await getUser();
         setSpotifyToken(userData.spotifyToken.accessToken || '');
+        showToast('User data fetched successfully!');
       } catch (err) {
         setError(err.message || 'Failed to fetch user data');
+        showToast(err.message || 'Failed to fetch user data', 'error');
         setSpotifyToken('');
-        handleSpotifyConnect(); // Attempt re-authentication
+        handleSpotifyConnect();
       }
     };
 
@@ -226,10 +268,14 @@ const Dashboard = () => {
 
     if (window.chrome && chrome.runtime) {
       chrome.runtime.sendMessage('cohlihkpndpeoklcbgcgaobmoojpdhpg', { message: 'ping' }, (response) => {
-        if (chrome.runtime.lastError || !response) setExtensionInstalled(false);
+        if (chrome.runtime.lastError || !response) {
+          setExtensionInstalled(false);
+          showToast('ChillBoard extension not detected!', 'error');
+        }
       });
     } else {
       setExtensionInstalled(false);
+      showToast('ChillBoard extension not detected!', 'error');
     }
 
     const loadModels = async () => {
@@ -242,6 +288,7 @@ const Dashboard = () => {
         await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
         console.log('FaceExpressionNet loaded');
         setModelsLoaded(true);
+        showToast('Emotion detection models loaded successfully!');
       } catch (err) {
         console.warn('Failed to load local models:', err);
         try {
@@ -250,9 +297,11 @@ const Dashboard = () => {
           await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
           console.log('Face-API.js models loaded from CDN');
           setModelsLoaded(true);
+          showToast('Emotion detection models loaded from CDN!');
         } catch (cdnErr) {
           console.error('Error loading models from CDN:', cdnErr);
           setError('Failed to load emotion detection models.');
+          showToast('Failed to load emotion detection models', 'error');
         }
       }
     };
@@ -269,8 +318,10 @@ const Dashboard = () => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting webcam');
       startWebcam();
+      showToast('Webcam enabled for mood detection!');
     } else if (webcamEnabled && !modelsLoaded) {
       setError('Emotion detection models are still loading. Please wait...');
+      showToast('Models are still loading', 'error');
     }
 
     return () => {
@@ -284,7 +335,7 @@ const Dashboard = () => {
   useEffect(() => {
     if (webcamEnabled && modelsLoaded && videoRef.current) {
       console.log('Starting emotion detection');
-      detectionIntervalRef.current = setInterval(detectEmotions, 10000); // Adjusted to 10 seconds
+      detectionIntervalRef.current = setInterval(detectEmotions, 10000);
 
       return () => {
         if (detectionIntervalRef.current) {
@@ -298,12 +349,14 @@ const Dashboard = () => {
   const startWebcam = async () => {
     if (!modelsLoaded) {
       setError('Models are still loading, please wait...');
+      showToast('Models are still loading', 'error');
       return;
     }
 
     if (!videoRef.current) {
       console.error('Video element not found in DOM');
       setError('Video element not found. Please refresh the page.');
+      showToast('Video element not found', 'error');
       setWebcamEnabled(false);
       return;
     }
@@ -321,6 +374,7 @@ const Dashboard = () => {
         }).catch(err => {
           console.error('Error playing video:', err);
           setError('Failed to play webcam video.');
+          showToast('Failed to play webcam video', 'error');
           stopWebcam();
         });
       };
@@ -333,6 +387,7 @@ const Dashboard = () => {
           ? 'No webcam found. Please connect a webcam and try again.'
           : `Failed to access webcam: ${err.message}`;
       setError(errorMsg);
+      showToast(errorMsg, 'error');
       setWebcamEnabled(false);
     }
   };
@@ -355,6 +410,7 @@ const Dashboard = () => {
     setDetectionAttempts(0);
     setCorrectedMood('');
     setLastSavedMood(null);
+    showToast('Webcam disabled');
   };
 
   const handleMoodCorrection = async (e) => {
@@ -374,10 +430,12 @@ const Dashboard = () => {
       setLastSavedMood(moodToSend);
       lastSentRef.current = { timestamp: Date.now(), mood: newMood, confidence: 1.0 };
       setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
-      await fetchRecommendationsAutomatically(); // Trigger recommendations on mood correction
+      showToast(`Corrected mood ${newMood} saved successfully!`);
+      await fetchRecommendationsAutomatically();
     } catch (err) {
       console.error('Error saving corrected mood:', err);
       setError('Failed to save corrected mood');
+      showToast('Failed to save corrected mood', 'error');
     }
   };
 
@@ -406,8 +464,10 @@ const Dashboard = () => {
       setActionStatus(accepted ? 'accepted' : 'declined');
       const updatedRecommendations = await getRecommendations();
       setRecommendations(updatedRecommendations);
+      showToast(`Recommendation ${accepted ? 'accepted' : 'declined'} successfully!`);
     } catch (err) {
       setError('Failed to update recommendation');
+      showToast('Failed to update recommendation', 'error');
     }
   };
 
@@ -415,8 +475,10 @@ const Dashboard = () => {
     try {
       const authorizeURL = await initiateSpotifyLogin();
       window.location.href = authorizeURL;
+      showToast('Spotify connection initiated!');
     } catch (err) {
       setError('Failed to initiate Spotify login');
+      showToast('Failed to initiate Spotify login', 'error');
     }
   };
 
@@ -425,14 +487,15 @@ const Dashboard = () => {
     try {
       await savePlaylist(currentPlaylist.id, { saved: true });
       setError('Playlist saved successfully!');
+      showToast('Playlist saved successfully!');
     } catch (err) {
       setError('Failed to save playlist');
+      showToast('Failed to save playlist', 'error');
     }
   };
 
   const handlePlay = () => {
     setIsPlaying(true);
-    // Save current playback position to localStorage
     const playbackState = localStorage.getItem('chillboardPlaybackState');
     const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
     setCurrentPlaylist(prev => ({ ...prev, offset }));
@@ -446,33 +509,44 @@ const Dashboard = () => {
         if (latestMood && latestMood.mood) {
           mood = latestMood.mood;
           setError(`Using latest mood from collection: ${mood} to fetch a new playlist.`);
+          showToast(`Using latest mood: ${mood} to fetch a new playlist`, 'info');
         } else {
           setError('No mood found in collection. Please enable mood detection or correct the mood.');
+          showToast('No mood found for new playlist', 'error');
           return;
         }
       } catch (err) {
         setError(`Failed to fetch latest mood: ${err.message}. Falling back to local mood.`);
+        showToast(`Failed to fetch latest mood: ${err.message}`, 'error');
         if (lastSavedMood) {
           mood = lastSavedMood.mood;
           setError(`Using last saved mood: ${mood} to fetch a new playlist.`);
+          showToast(`Using last saved mood: ${mood} to fetch a new playlist`, 'info');
         }
       }
     }
     if (!mood) {
       setError('No mood detected or available to fetch a new playlist. Please enable mood detection or correct the mood.');
+      showToast('No mood detected for new playlist', 'error');
       return;
     }
     try {
       const newPlaylist = await fetchNewPlaylist(mood, true);
       console.log('New playlist fetched:', newPlaylist);
-      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 }); // Reset offset on skip
+      // Update current playlist immediately
+      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 });
       console.log('Current playlist updated to:', { id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
       setError('New playlist loaded!');
+      showToast('New playlist loaded!');
       setIsPlaying(false);
-      localStorage.removeItem('chillboardPlaybackState'); // Clear previous state on skip
+      // Clear localStorage to prevent old state from loading
+      localStorage.removeItem('chillboardPlaybackState');
+      // Sync with recommendations to ensure consistency
+      await fetchRecommendationsAutomatically();
     } catch (err) {
       setError(`Failed to fetch new playlist: ${err.message}. Attempting re-authentication...`);
-      await handleSpotifyConnect(); // Trigger re-auth if fetch fails
+      showToast(`Failed to fetch new playlist: ${err.message}`, 'error');
+      await handleSpotifyConnect();
     }
   };
 
@@ -516,7 +590,6 @@ const Dashboard = () => {
 
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
 
-  // Persist playback state on unmount and page change
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (isPlaying && currentPlaylist.id) {
@@ -528,6 +601,22 @@ const Dashboard = () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [isPlaying, currentPlaylist]);
+
+  // Load initial playlist state, prioritizing recommendations over localStorage
+  useEffect(() => {
+    const initializePlaylist = async () => {
+      const playbackState = localStorage.getItem('chillboardPlaybackState');
+      if (recommendations.length > 0 && recommendations[0].type === 'music') {
+        const details = JSON.parse(recommendations[0].details);
+        setCurrentPlaylist({ id: details.playlistId, name: details.name, offset: 0 });
+      } else if (playbackState && !currentPlaylist.id) {
+        const { id, offset, name } = JSON.parse(playbackState);
+        setCurrentPlaylist({ id, name, offset });
+      }
+      await fetchRecommendationsAutomatically(); // Ensure latest recommendations are fetched
+    };
+    initializePlaylist();
+  }, [recommendations]);
 
   return (
     <div className="min-h-screen bg-green-50 p-4 md:p-6">
@@ -630,16 +719,17 @@ const Dashboard = () => {
                       token={spotifyToken}
                       uris={[`spotify:playlist:${currentPlaylist.id}`]}
                       play={isPlaying}
-                      offset={currentPlaylist.offset} // Resume from last position
+                      offset={currentPlaylist.offset}
                       callback={async (state) => {
                         if (state.isPlaying) {
                           console.log('Playing:', state.track.name);
-                          setCurrentPlaylist(prev => ({ ...prev, offset: state.progressMs / 1000 || 0 })); // Update offset in seconds
+                          setCurrentPlaylist(prev => ({ ...prev, offset: state.progressMs / 1000 || 0 }));
                           localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: state.progressMs / 1000, name: currentPlaylist.name }));
                         }
                         if (state.error) {
                           console.error('Playback error:', state.error);
                           setError(`Playback failed: ${state.error.message}`);
+                          showToast(`Playback failed: ${state.error.message}`, 'error');
                           if (state.error.status === 401) {
                             await handleSpotifyConnect();
                             const userData = await getUser();
@@ -649,6 +739,7 @@ const Dashboard = () => {
                               const userData = await getUser();
                               setSpotifyToken(userData.spotifyToken.accessToken || '');
                               setError('Retrying playback...');
+                              showToast('Retrying playback...', 'info');
                             }, 5000);
                           }
                         }
@@ -703,6 +794,7 @@ const Dashboard = () => {
           {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No tab usage data available.</p>}
         </div>
       </div>
+      <ToastContainer />
     </div>
   );
 };

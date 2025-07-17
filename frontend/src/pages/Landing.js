@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import AuthForm from '../components/AuthForm';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
 
 const Landing = () => {
   const [showForm, setShowForm] = useState(null);
@@ -58,6 +60,7 @@ const Landing = () => {
           </div>
         </div>
       )}
+      <ToastContainer />
     </div>
   );
 };
