@@ -111,14 +111,6 @@ const Dashboard = () => {
     return () => clearTimeout(pollTimeout);
   }, []);
 
-  // Trigger recommendation fetch on significant changes
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      fetchRecommendationsAutomatically();
-    }, 1000); // Debounce by 1 second
-    return () => clearTimeout(handler);
-  }, [screenTimeData, lastSavedMood]);
-
   // Periodic recommendation refresh every 5 minutes
   useEffect(() => {
     recommendationIntervalRef.current = setInterval(() => {
@@ -187,7 +179,6 @@ const Dashboard = () => {
             setLastSavedMood(moodToSend);
             lastSentRef.current = { timestamp: now, mood: moodText, confidence };
             showToast(`Mood ${moodText} saved successfully!`);
-            await fetchRecommendationsAutomatically();
           } catch (err) {
             console.error('Error sending mood to backend:', err);
             setError('Failed to send mood data to backend.');
