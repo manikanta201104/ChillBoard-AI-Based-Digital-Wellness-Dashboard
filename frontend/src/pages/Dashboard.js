@@ -1,4 +1,3 @@
-
 /*global chrome */
 
 import React, { useEffect, useState, useRef } from 'react';
@@ -34,11 +33,13 @@ const Dashboard = () => {
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
   const timerRef = useRef(null);
   const detectionIntervalRef = useRef(null);
+  const recommendationIntervalRef = useRef(null);
 
   // Helper function to show toast notifications
   const showToast = (message, type = 'success') => {
@@ -63,22 +64,49 @@ const Dashboard = () => {
   const fetchRecommendationsAutomatically = async () => {
     try {
       const latestScreenTime = screenTimeData.length > 0 ? screenTimeData[0] : null;
-      const latestMood = lastSavedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
+      let latestMood = lastSavedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
+
+      // If latestMood is still null, attempt to fetch from backend
+      if (!latestMood) {
+        console.log('Attempting to fetch latest mood from backend');
+        const moodData = await getLatestMood();
+        if (moodData && moodData.mood) {
+          latestMood = moodData.mood.toLowerCase();
+          setLastSavedMood(moodData);
+          console.log('Fetched latest mood:', latestMood);
+        } else {
+          console.log('No mood data available from backend');
+        }
+      }
+
+      console.log('Fetching recommendations with:', { latestScreenTime, latestMood }); // Debug log
       if (latestScreenTime && latestMood) {
-        await getRecommendations();
+        await getRecommendations(); // Ensure fresh data
         const updatedRecommendations = await getRecommendations();
+        console.log('Received recommendations:', updatedRecommendations); // Debug the received data
         setRecommendations(updatedRecommendations);
+        setRetryCount(0); // Reset retry count on success
         showToast('Recommendations fetched successfully!');
         const latestRec = updatedRecommendations.length > 0 ? updatedRecommendations[0] : null;
+        console.log('Latest recommendation:', latestRec); // Debug the latest recommendation
         if (latestRec && latestRec.type === 'music') {
           const details = JSON.parse(latestRec.details);
           setCurrentPlaylist(prev => ({ ...prev, id: details.playlistId, name: details.name }));
+        } else {
+          setCurrentPlaylist({ id: '', name: '', offset: 0 }); // Reset playlist if not music
         }
+      } else {
+        console.log('Skipping recommendation fetch: missing screen time or mood');
+        setCurrentPlaylist({ id: '', name: '', offset: 0 }); // Reset playlist if conditions not met
       }
     } catch (err) {
       setError('Failed to fetch recommendations automatically');
       showToast('Failed to fetch recommendations automatically', 'error');
-      console.error(err);
+      console.error('Recommendation fetch error:', err);
+      if (retryCount < 3) {
+        setRetryCount(prev => prev + 1);
+        setTimeout(fetchRecommendationsAutomatically, 5000 * retryCount); // Retry after 5s, 10s, 15s
+      }
     }
   };
 
@@ -96,10 +124,28 @@ const Dashboard = () => {
           setError(err.message || 'Failed to poll screen time');
           showToast(err.message || 'Failed to poll screen time', 'error');
         }
-      }, 60000);
+      }, 60000); // Every 60 seconds for testing, adjust to 300000 ms (5 minutes) for production
       return () => clearInterval(interval);
     };
     pollScreenTime();
+  }, []);
+
+  // Trigger recommendation fetch on screen time or mood changes
+  useEffect(() => {
+    fetchRecommendationsAutomatically();
+  }, [screenTimeData, lastSavedMood]);
+
+  // Periodic recommendation refresh every 5 minutes
+  useEffect(() => {
+    recommendationIntervalRef.current = setInterval(() => {
+      console.log('Periodic recommendation refresh triggered');
+      fetchRecommendationsAutomatically();
+    }, 300000); // 5 minutes
+    return () => {
+      if (recommendationIntervalRef.current) {
+        clearInterval(recommendationIntervalRef.current);
+      }
+    };
   }, []);
 
   const detectEmotions = async () => {
@@ -232,15 +278,34 @@ const Dashboard = () => {
       }
     };
 
+    const fetchLatestMood = async () => {
+      try {
+        const moodData = await getLatestMood();
+        if (moodData && moodData.mood) {
+          setLastSavedMood(moodData);
+          console.log('Initial mood fetched:', moodData.mood);
+        } else {
+          console.log('No initial mood data available');
+        }
+      } catch (err) {
+        console.error('Failed to fetch initial mood:', err);
+        setError('Failed to fetch initial mood data');
+        showToast('Failed to fetch initial mood data', 'error');
+      }
+    };
+
     const fetchRecommendations = async () => {
       try {
         const data = await getRecommendations();
+        console.log('Initial recommendations fetched:', data); // Debug initial fetch
         setRecommendations(data);
         showToast('Recommendations fetched successfully!');
         const latestRec = data.length > 0 ? data[0] : null;
         if (latestRec && latestRec.type === 'music') {
           const details = JSON.parse(latestRec.details);
           setCurrentPlaylist(prev => ({ ...prev, id: details.playlistId, name: details.name }));
+        } else {
+          setCurrentPlaylist({ id: '', name: '', offset: 0 }); // Reset if not music
         }
       } catch (err) {
         setError(err.message || 'Failed to fetch recommendations');
@@ -262,6 +327,7 @@ const Dashboard = () => {
     };
 
     fetchScreenTime();
+    fetchLatestMood();
     fetchRecommendations();
     fetchUserData();
     fetchLeaderboard();
@@ -311,6 +377,7 @@ const Dashboard = () => {
     return () => {
       stopWebcam();
       if (timerRef.current) clearInterval(timerRef.current);
+      if (recommendationIntervalRef.current) clearInterval(recommendationIntervalRef.current);
     };
   }, [localStorage.getItem('userId')]);
 
@@ -533,15 +600,12 @@ const Dashboard = () => {
     try {
       const newPlaylist = await fetchNewPlaylist(mood, true);
       console.log('New playlist fetched:', newPlaylist);
-      // Update current playlist immediately
       setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 });
       console.log('Current playlist updated to:', { id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name });
       setError('New playlist loaded!');
       showToast('New playlist loaded!');
       setIsPlaying(false);
-      // Clear localStorage to prevent old state from loading
       localStorage.removeItem('chillboardPlaybackState');
-      // Sync with recommendations to ensure consistency
       await fetchRecommendationsAutomatically();
     } catch (err) {
       setError(`Failed to fetch new playlist: ${err.message}. Attempting re-authentication...`);
@@ -602,7 +666,6 @@ const Dashboard = () => {
     };
   }, [isPlaying, currentPlaylist]);
 
-  // Load initial playlist state, prioritizing recommendations over localStorage
   useEffect(() => {
     const initializePlaylist = async () => {
       const playbackState = localStorage.getItem('chillboardPlaybackState');
@@ -612,8 +675,10 @@ const Dashboard = () => {
       } else if (playbackState && !currentPlaylist.id) {
         const { id, offset, name } = JSON.parse(playbackState);
         setCurrentPlaylist({ id, name, offset });
+      } else {
+        setCurrentPlaylist({ id: '', name: '', offset: 0 }); // Reset if no valid recommendation
       }
-      await fetchRecommendationsAutomatically(); // Ensure latest recommendations are fetched
+      await fetchRecommendationsAutomatically();
     };
     initializePlaylist();
   }, [recommendations]);
@@ -794,7 +859,7 @@ const Dashboard = () => {
           {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No tab usage data available.</p>}
         </div>
       </div>
-      <ToastContainer />
+      {/* <ToastContainer /> */}
     </div>
   );
 };

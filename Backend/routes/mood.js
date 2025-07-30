@@ -18,27 +18,30 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid confidence value' });
     }
 
-    const lastMood = await Mood.findOne({ userId });
-    const confidenceDrop = lastMood ? Math.abs(confidence - lastMood.confidence) : 0;
-    const timeSinceLast = lastMood ? (Date.now() - lastMood.timestamp) / 1000 : 30;
+    // Fetch the latest mood to calculate timeSinceLast
+    const latestMood = await Mood.findOne({ userId }).sort({ timestamp: -1 });
+    const timeSinceLast = latestMood ? (Date.now() - latestMood.timestamp.getTime()) / 1000 : 30;
+    const confidenceDrop = latestMood ? Math.abs(confidence - latestMood.confidence) : 0;
 
-    if (confidenceDrop > 0.2 || (timeSinceLast >= 30 && mood !== lastMood?.mood)) {
-      const updatedMood = await Mood.findOneAndUpdate(
-        { userId },
-        { mood, confidence, timestamp: new Date() },
-        { upsert: true, new: true, runValidators: true }
-      );
+    if (confidenceDrop > 0.2 || (timeSinceLast >= 30 && (!latestMood || mood !== latestMood.mood))) {
+      const newMood = new Mood({
+        userId,
+        mood,
+        confidence,
+        timestamp: new Date(),
+      });
+      const savedMood = await newMood.save();
 
-      logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
+      logger.info('Mood updated', { userId, mood, confidence, timestamp: savedMood.timestamp });
 
-      // Simulate TriggerLink for recommendations (Day 15)
+      // Simulate TriggerLink for recommendations
       const triggerLink = {
         fromSource: 'mood',
         data: { mood, confidence, timestamp: new Date().toISOString() },
       };
       logger.info('TriggerLink generated', triggerLink);
 
-      res.status(200).json({ message: 'Mood updated', mood: updatedMood });
+      res.status(200).json({ message: 'Mood updated', mood: savedMood });
     } else {
       logger.info('No significant mood change, skipping update', { userId, mood, confidence });
       res.status(204).send('No significant change');
@@ -54,7 +57,7 @@ router.get('/latest', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    const latestMood = await Mood.findOne({ userId }).exec();
+    const latestMood = await Mood.findOne({ userId }).sort({ timestamp: -1 }).exec();
 
     if (!latestMood) {
       return res.status(404).json({ message: 'No mood data found for this user' });

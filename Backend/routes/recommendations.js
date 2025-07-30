@@ -14,15 +14,21 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // Fetch latest ScreenTime data
-    const latestScreenTime = await ScreenTime.findOne({ userId })
-      .sort({ date: -1 })
-      .limit(1);
+    // Fetch latest ScreenTime data for the current day
+    const today = new Date().toISOString().split('T')[0];
+    let latestScreenTime = await ScreenTime.findOne({ userId, date: today });
+
+    // If no document exists, upsert a new one
+    if (!latestScreenTime) {
+      latestScreenTime = await ScreenTime.findOneAndUpdate(
+        { userId, date: today },
+        { userId, date: today, totalTime: 0, tabs: [] },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
+    }
 
     // Fetch latest Mood data
-    const latestMood = await Mood.findOne({ userId })
-      .sort({ timestamp: -1 })
-      .limit(1);
+    const latestMood = await Mood.findOne({ userId }).sort({ timestamp: -1 }).limit(1);
 
     // Default recommendation
     let recommendation = {
@@ -37,26 +43,31 @@ router.post('/', authMiddleware, async (req, res) => {
     if (latestScreenTime && latestMood) {
       const totalTime = latestScreenTime.totalTime / 60; // Convert to minutes
       const mood = latestMood.mood.toLowerCase();
+      console.log('Evaluating recommendation with:', { totalTime, mood, timestamp: latestMood.timestamp, rawTotalTime: latestScreenTime.totalTime }); // Enhanced debug log
 
       // Check most specific conditions first
       if (totalTime > 300 && mood === 'stressed') {
-        // Fetch a fresh calm playlist directly from Spotify
-        const playlistResponse = await axios.get(`http://localhost:5000/spotify/playlist?mood=calm`, {
-          headers: { Authorization: req.headers.authorization },
-        });
-        const { spotifyPlaylistId, name } = playlistResponse.data;
-        recommendation = {
-          type: 'music',
-          details: {
-            playlistId: spotifyPlaylistId,
-            name,
-          },
-          trigger: { screenTime: '>5h', mood: 'stressed' },
-          triggerSource: 'mood',
-          triggerNote: 'Music suggested for stress',
-        };
+        try {
+          const playlistResponse = await axios.get(`http://localhost:5000/spotify/playlist?mood=calm`, {
+            headers: { Authorization: req.headers.authorization },
+          });
+          const { spotifyPlaylistId, name } = playlistResponse.data;
+          recommendation = {
+            type: 'music',
+            details: {
+              playlistId: spotifyPlaylistId,
+              name,
+            },
+            trigger: { screenTime: '>5h', mood: 'stressed' },
+            triggerSource: 'mood',
+            triggerNote: 'Music suggested for stress',
+          };
+          console.log('Music recommendation triggered:', { playlistId: spotifyPlaylistId, name });
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
       } else if (totalTime > 180 && mood === 'tired') {
-        // Fetch a fresh relax playlist directly from Spotify
         const playlistResponse = await axios.get(`http://localhost:5000/spotify/playlist?mood=tired`, {
           headers: { Authorization: req.headers.authorization },
         });
@@ -79,7 +90,11 @@ router.post('/', authMiddleware, async (req, res) => {
           triggerSource: 'mood',
           triggerNote: 'Triggered by positive mood',
         };
+      } else {
+        console.log('No matching condition met:', { totalTime, mood });
       }
+    } else {
+      console.log('Missing latestScreenTime or latestMood:', { latestScreenTime, latestMood });
     }
 
     // Save recommendation to database
@@ -88,7 +103,7 @@ router.post('/', authMiddleware, async (req, res) => {
       userId,
       timestamp: new Date(),
       type: recommendation.type,
-      details: JSON.stringify(recommendation.details), // Ensure consistent stringification
+      details: JSON.stringify(recommendation.details),
       trigger: JSON.stringify(recommendation.trigger),
       accepted: false,
     });
