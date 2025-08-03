@@ -4,7 +4,20 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import * as faceapi from 'face-api.js';
-import { getScreenTime, saveMood, getRecommendations, updateRecommendation, initiateSpotifyLogin, getUser, savePlaylist, fetchNewPlaylist, getLatestMood, getLeaderboard, getChallenges } from '../utils/api';
+import {
+  getScreenTime,
+  saveMood,
+  getRecommendations,
+  updateRecommendation,
+  initiateSpotifyLogin,
+  getUser,
+  savePlaylist,
+  fetchNewPlaylist,
+  getLatestMood,
+  getLeaderboard,
+  getChallenges,
+  startPlayback,
+} from '../utils/api';
 import SpotifyPlayer from 'react-spotify-web-playback';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -33,6 +46,7 @@ const Dashboard = () => {
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [deviceId, setDeviceId] = useState(''); // New state for device ID
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
@@ -70,10 +84,8 @@ const Dashboard = () => {
       }
 
       if (latestScreenTime && latestMood) {
-        await getRecommendations();
         const updatedRecommendations = await getRecommendations();
         setRecommendations(updatedRecommendations);
-        showToast('Recommendations fetched successfully!');
         const latestRec = updatedRecommendations[0];
         if (latestRec?.type === 'music') {
           const details = JSON.parse(latestRec.details);
@@ -86,6 +98,9 @@ const Dashboard = () => {
       setError('Failed to fetch recommendations automatically');
       showToast('Failed to fetch recommendations automatically', 'error');
       console.error('Recommendation fetch error:', err);
+      if (err.message.includes('token')) {
+        await handleSpotifyConnect();
+      }
     }
   }, [screenTimeData, lastSavedMood, detectedMood, localStorage.getItem('userId')]);
 
@@ -179,6 +194,7 @@ const Dashboard = () => {
             setLastSavedMood(moodToSend);
             lastSentRef.current = { timestamp: now, mood: moodText, confidence };
             showToast(`Mood ${moodText} saved successfully!`);
+            await fetchRecommendationsAutomatically();
           } catch (err) {
             console.error('Error sending mood to backend:', err);
             setError('Failed to send mood data to backend.');
@@ -228,18 +244,19 @@ const Dashboard = () => {
   useEffect(() => {
     const initialize = async () => {
       try {
-        await Promise.all([getScreenTime(), getLatestMood(), getRecommendations(), getUser(), fetchLeaderboard()]);
-        const data = await getScreenTime();
-        setScreenTimeData(data.sort((a, b) => new Date(b.date) - new Date(a.date)));
-        const moodData = await getLatestMood();
+        const [screenTimeData, moodData, recData, userData] = await Promise.all([getScreenTime(), getLatestMood(), getRecommendations(), getUser()]);
+        setScreenTimeData(screenTimeData.sort((a, b) => new Date(b.date) - new Date(a.date)));
         setLastSavedMood(moodData);
-        const recData = await getRecommendations();
         setRecommendations(recData);
-        const userData = await getUser();
         setSpotifyToken(userData.spotifyToken?.accessToken || '');
+        setDeviceId(userData.deviceId || ''); // Assuming deviceId is returned from getUser
+        await fetchLeaderboard();
       } catch (err) {
         setError(err.message || 'Failed to initialize data');
         showToast(err.message || 'Failed to initialize data', 'error');
+        if (err.message.includes('token')) {
+          await handleSpotifyConnect();
+        }
       }
 
       if (window.chrome && chrome.runtime) {
@@ -300,6 +317,7 @@ const Dashboard = () => {
       return () => {
         if (detectionIntervalRef.current) {
           clearInterval(detectionIntervalRef.current);
+          detectionIntervalRef.current = null;
         }
       };
     }
@@ -426,11 +444,32 @@ const Dashboard = () => {
     }
   };
 
-  const handlePlay = () => {
+  const handlePlay = async () => {
+    if (!deviceId) {
+      setError('No device ID available. Please ensure Spotify is active.');
+      showToast('No device ID available', 'error');
+      return;
+    }
     setIsPlaying(true);
-    const playbackState = localStorage.getItem('chillboardPlaybackState');
-    const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
-    setCurrentPlaylist(prev => ({ ...prev, offset }));
+    try {
+      await startPlayback(deviceId, currentPlaylist.id, currentPlaylist.offset);
+      const playbackState = localStorage.getItem('chillboardPlaybackState');
+      const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
+      setCurrentPlaylist(prev => ({ ...prev, offset }));
+      showToast('Playback started!');
+    } catch (err) {
+      console.error('Playback error:', err);
+      setError(`Playback failed: ${err.message}`);
+      showToast(`Playback failed: ${err.message}`, 'error');
+      if (err.response?.status === 403) {
+        showToast('Playback restricted. Please ensure you have a Spotify Premium account.', 'error');
+      } else if (err.message.includes('token')) {
+        await handleSpotifyConnect();
+        const userData = await getUser();
+        setSpotifyToken(userData.spotifyToken?.accessToken || '');
+        setDeviceId(userData.deviceId || '');
+      }
+    }
   };
 
   const handleSkipPlaylist = async () => {
@@ -637,10 +676,12 @@ const Dashboard = () => {
                             await handleSpotifyConnect();
                             const userData = await getUser();
                             setSpotifyToken(userData.spotifyToken?.accessToken || '');
+                            setDeviceId(userData.deviceId || '');
                           } else if (state.error.status === 503) {
                             setTimeout(async () => {
                               const userData = await getUser();
                               setSpotifyToken(userData.spotifyToken?.accessToken || '');
+                              setDeviceId(userData.deviceId || '');
                               showToast('Retrying playback...', 'info');
                             }, 5000);
                           }

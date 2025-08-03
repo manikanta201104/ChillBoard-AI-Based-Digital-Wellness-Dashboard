@@ -10,7 +10,7 @@ const router = express.Router();
 
 // POST /screen-time - Save or update screen time data for the day
 router.post('/', authMiddleware, async (req, res) => {
-  let { totalTime, tabs, date } = req.body;
+  let { totalTime, tabs, date, screenTimeId } = req.body;
   const userId = req.user.userId;
 
   try {
@@ -39,18 +39,27 @@ router.post('/', authMiddleware, async (req, res) => {
       return true;
     });
 
+    // Ensure screenTimeId is set, generate if not provided
+    if (!screenTimeId) {
+      screenTimeId = `st_${Date.now()}_${userId}`;
+      logger.info('Generated screenTimeId', { screenTimeId });
+    }
+
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Aggregate totalTime and tabs
+      // Update existing document
       screenTime.totalTime += totalTime;
       const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
       validTabs.forEach((tab) => {
         existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
       });
       screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
+      // Preserve or update screenTimeId if needed
+      screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
     } else {
+      // Create new document
       screenTime = new ScreenTime({
-        screenTimeId: `st_${Date.now()}_${userId}`,
+        screenTimeId,
         userId,
         date,
         totalTime,
@@ -83,7 +92,7 @@ router.post('/', authMiddleware, async (req, res) => {
       }
     }
     logger.error('Error saving screen time:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 

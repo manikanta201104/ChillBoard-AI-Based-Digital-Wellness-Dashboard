@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://chillbro-backend.onrender.com',
+  baseURL: 'http://localhost:5000', // Adjust to your backend URL
   headers: {
     'Content-Type': 'application/json',
   },
@@ -130,6 +130,21 @@ export const fetchNewPlaylist = async (mood, skip = false) => {
   return response.data;
 };
 
+export const startPlayback = async (deviceId, playlistId, offset = 0) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.post(
+    '/spotify/play',
+    { device_id: deviceId, playlist_id: playlistId, offset },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+  return response.data;
+};
+
 export const getLatestMood = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
@@ -155,9 +170,7 @@ export const joinChallenge = async challengeId => {
   if (!token) throw new Error('No token found');
   const response = await api.post(
     '/challenges/join',
-    {
-      challengeId,
-    },
+    { challengeId },
     {
       headers: {
         Authorization: `Bearer ${token}`,

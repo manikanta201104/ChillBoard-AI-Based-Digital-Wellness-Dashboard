@@ -1,4 +1,3 @@
-
 import express from 'express';
 import SpotifyWebApi from 'spotify-web-api-node';
 import { logger } from '../index.js';
@@ -15,8 +14,12 @@ const spotifyApi = new SpotifyWebApi({
   redirectUri: process.env.SPOTIFY_REDIRECT_URI,
 });
 
-// Scopes for Spotify permissions (updated to include streaming)
-const scopes = ['user-read-private', 'streaming', 'user-read-email'];
+// Scopes for Spotify permissions (added user-modify-playback-state)
+const scopes = [
+  'user-read-private',
+  'streaming',
+  'user-read-email',
+];
 
 // Mood to Spotify category mapping
 const moodCategoryMap = {
@@ -118,7 +121,7 @@ router.get('/callback', async (req, res) => {
       { new: true }
     );
 
-    logger.info('Spotify tokens saved for user', { userId });
+    logger.info('Spotify tokens saved for player', { userId });
     res.redirect('http://localhost:3000/dashboard');
   } catch (err) {
     logger.error('Error in Spotify callback', { error: err.message, stack: err.stack });
@@ -145,17 +148,19 @@ router.get('/playlist', authMiddleware, async (req, res) => {
     const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
 
     let currentAccessToken = accessToken;
-    if (now >= tokenExpiry) {
-      logger.info('Token expired, refreshing', { userId, tokenExpiry });
+    if (now >= tokenExpiry - 300000) { // Refresh if token expires within 5 minutes
+      logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
       currentAccessToken = await refreshAccessToken(userId, refreshToken);
       if (!currentAccessToken) {
         return res.status(500).json({ message: 'Failed to refresh access token' });
       }
+      // Update spotifyApi with new token
+      spotifyApi.setAccessToken(currentAccessToken);
     } else {
       logger.info('Token still valid', { userId, tokenExpiry });
+      spotifyApi.setAccessToken(currentAccessToken);
     }
 
-    // Invalidate cache when skipping to ensure a new playlist
     let cachedPlaylist = null;
     if (!skip) {
       const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -172,10 +177,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       }
     }
 
-    // Always fetch a new playlist when skipping
     if (skip || !cachedPlaylist) {
-      spotifyApi.setAccessToken(currentAccessToken);
-
       const category = moodCategoryMap[mood.toLowerCase()] || moodCategoryMap.default;
 
       let playlists;
@@ -183,8 +185,18 @@ router.get('/playlist', authMiddleware, async (req, res) => {
         playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
         logger.info('Spotify API response', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
       } catch (searchErr) {
-        logger.error('Spotify API error', { error: searchErr.message, stack: searchErr.stack, statusCode: searchErr.statusCode });
-        throw searchErr;
+        if (searchErr.statusCode === 401) {
+          logger.warn('Token invalid, retrying with refresh', { userId });
+          currentAccessToken = await refreshAccessToken(userId, refreshToken);
+          spotifyApi.setAccessToken(currentAccessToken);
+          playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
+        } else if (searchErr.statusCode === 500) {
+          logger.error('Spotify server error, retrying after delay', { userId });
+          await new Promise(resolve => setTimeout(resolve, 5000)); // 5-second delay
+          playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
+        } else {
+          throw searchErr;
+        }
       }
 
       if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
@@ -195,10 +207,6 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       if (availablePlaylists.length === 0 && !skip) {
         logger.warn('No new playlists available, forcing new search');
         playlists = await spotifyApi.searchPlaylists(`category:${category} calm`, { limit: 10 });
-        logger.info('Spotify API response (retry)', { items: playlists.body.playlists?.items?.map(p => ({ id: p?.id, name: p?.name })) || [] });
-        if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
-          return res.status(404).json({ message: 'No new playlists available after retry' });
-        }
         availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
       }
 
@@ -217,7 +225,6 @@ router.get('/playlist', authMiddleware, async (req, res) => {
         await newPlaylist.save();
         logger.info('New playlist saved', { userId, playlistId: playlist.id });
       } else if (skip) {
-        // Update existing playlist to mark it as used and reset cache
         await Playlist.findOneAndUpdate(
           { spotifyPlaylistId: playlist.id },
           { createdAt: new Date(), saved: false },
@@ -226,12 +233,77 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       }
 
       res.status(200).json(response);
-    } else {
-      logger.info('No mood change detected, returning cached playlist', { userId, mood });
-      res.status(200).json({ spotifyPlaylistId: cachedPlaylist.spotifyPlaylistId, name: cachedPlaylist.name, mood });
     }
   } catch (err) {
     logger.error('Error fetching playlist', { error: err.message, stack: err.stack, statusCode: err.statusCode });
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// New endpoint to control playback with device cleanup
+router.post('/play', authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+  const { device_id, playlist_id, offset } = req.body;
+
+  try {
+    const user = await User.findOne({ userId });
+    if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) {
+      return res.status(400).json({ message: 'Spotify token not found' });
+    }
+
+    const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
+    const now = Date.now();
+    const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
+
+    let currentAccessToken = accessToken;
+    if (now >= tokenExpiry - 300000) {
+      logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
+      currentAccessToken = await refreshAccessToken(userId, refreshToken);
+      if (!currentAccessToken) {
+        return res.status(500).json({ message: 'Failed to refresh access token' });
+      }
+      spotifyApi.setAccessToken(currentAccessToken);
+    } else {
+      logger.info('Token still valid', { userId, tokenExpiry });
+      spotifyApi.setAccessToken(currentAccessToken);
+    }
+
+    // Attempt to transfer playback and start
+    try {
+      await spotifyApi.transferMyPlayback([device_id]);
+      logger.info('Playback transferred to device', { userId, device_id });
+    } catch (transferErr) {
+      if (transferErr.statusCode === 403) {
+        logger.warn('Transfer failed: Restriction violated', { userId, device_id, error: transferErr.message });
+        return res.status(403).json({
+          message: 'Transfer failed: Restriction violated',
+          error: { reason: 'UNKNOWN' },
+        });
+      }
+      throw transferErr;
+    }
+
+    // Attempt to start playback
+    await spotifyApi.play({
+      device_id,
+      context_uri: `spotify:playlist:${playlist_id}`,
+      offset: { position: offset || 0 },
+    });
+
+    logger.info('Playback started successfully', { userId, device_id, playlist_id, offset });
+    res.status(200).json({ message: 'Playback started' });
+  } catch (err) {
+    logger.error('Error starting playback', {
+      error: err.body ? `${err.message} - ${JSON.stringify(err.body)}` : err.message,
+      stack: err.stack,
+      statusCode: err.statusCode,
+    });
+    if (err.statusCode === 403) {
+      return res.status(403).json({
+        message: 'Playback failed: Restriction violated',
+        error: err.body ? err.body : { reason: 'UNKNOWN' },
+      });
+    }
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });

@@ -24,15 +24,14 @@ router.post('/', authMiddleware, async (req, res) => {
     const confidenceDrop = latestMood ? Math.abs(confidence - latestMood.confidence) : 0;
 
     if (confidenceDrop > 0.2 || (timeSinceLast >= 30 && (!latestMood || mood !== latestMood.mood))) {
-      const newMood = new Mood({
-        userId,
-        mood,
-        confidence,
-        timestamp: new Date(),
-      });
-      const savedMood = await newMood.save();
+      // Use upsert to update or insert based on userId
+      const updatedMood = await Mood.findOneAndUpdate(
+        { userId },
+        { mood, confidence, timestamp: new Date() },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+      );
 
-      logger.info('Mood updated', { userId, mood, confidence, timestamp: savedMood.timestamp });
+      logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
 
       // Simulate TriggerLink for recommendations
       const triggerLink = {
@@ -41,14 +40,14 @@ router.post('/', authMiddleware, async (req, res) => {
       };
       logger.info('TriggerLink generated', triggerLink);
 
-      res.status(200).json({ message: 'Mood updated', mood: savedMood });
+      res.status(200).json({ message: 'Mood updated', mood: updatedMood });
     } else {
       logger.info('No significant mood change, skipping update', { userId, mood, confidence });
       res.status(204).send('No significant change');
     }
   } catch (error) {
     logger.error('Error updating mood:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
@@ -67,7 +66,7 @@ router.get('/latest', authMiddleware, async (req, res) => {
     res.status(200).json(latestMood);
   } catch (error) {
     logger.error('Error fetching latest mood:', error);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: 'Server error', error: error.message });
   }
 });
 
