@@ -46,13 +46,12 @@ const Dashboard = () => {
   const [detectionAttempts, setDetectionAttempts] = useState(0);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [deviceId, setDeviceId] = useState(''); // New state for device ID
+  const [deviceId, setDeviceId] = useState('');
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
   const timerRef = useRef(null);
-  const detectionIntervalRef = useRef(null);
-  const recommendationIntervalRef = useRef(null);
+  const updateIntervalRef = useRef(null);
 
   // Helper function to show toast notifications
   const showToast = (message, type = 'success') => {
@@ -75,7 +74,7 @@ const Dashboard = () => {
 
     try {
       const latestScreenTime = screenTimeData.length > 0 ? screenTimeData[0] : null;
-      let latestMood = lastSavedMood || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
+      let latestMood = lastSavedMood?.mood?.toLowerCase() || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
 
       if (!latestMood) {
         const moodData = await getLatestMood();
@@ -95,47 +94,107 @@ const Dashboard = () => {
         }
       }
     } catch (err) {
-      setError('Failed to fetch recommendations automatically');
-      showToast('Failed to fetch recommendations automatically', 'error');
+      setError('Failed to fetch recommendations');
+      showToast('Failed to fetch recommendations', 'error');
       console.error('Recommendation fetch error:', err);
       if (err.message.includes('token')) {
         await handleSpotifyConnect();
       }
     }
-  }, [screenTimeData, lastSavedMood, detectedMood, localStorage.getItem('userId')]);
+  }, [screenTimeData, lastSavedMood, detectedMood]);
 
-  // Poll screen time with debouncing
+  // Consolidated data polling
   useEffect(() => {
-    let pollTimeout;
-    const pollScreenTime = async () => {
+    const pollData = async () => {
       try {
-        const data = await getScreenTime();
-        const sortedData = data.sort((a, b) => new Date(b.date) - new Date(a.date));
-        setScreenTimeData(sortedData);
-        showToast('Screen time data updated!');
-        clearTimeout(pollTimeout);
-        pollTimeout = setTimeout(pollScreenTime, 300000); // 5 minutes
-        await fetchRecommendationsAutomatically();
+        const [screenTimeData, moodData, recData, userData] = await Promise.all([
+          getScreenTime(),
+          getLatestMood(),
+          getRecommendations(),
+          getUser(),
+        ]);
+        setScreenTimeData(screenTimeData.sort((a, b) => new Date(b.date) - new Date(a.date)));
+        setLastSavedMood(moodData);
+        setRecommendations(recData);
+        setSpotifyToken(userData.spotifyToken?.accessToken || '');
+        setDeviceId(userData.deviceId || '');
+        await fetchLeaderboard();
       } catch (err) {
-        setError(err.message || 'Failed to poll screen time');
-        showToast(err.message || 'Failed to poll screen time', 'error');
+        setError(err.message || 'Failed to fetch data');
+        showToast(err.message || 'Failed to fetch data', 'error');
+        if (err.message.includes('token')) {
+          await handleSpotifyConnect();
+        }
       }
     };
 
-    pollTimeout = setTimeout(pollScreenTime, 0);
-    return () => clearTimeout(pollTimeout);
-  }, []);
+    const initialize = async () => {
+      await pollData();
+      updateIntervalRef.current = setInterval(pollData, 300000); // 5 minutes
+    };
 
-  // Periodic recommendation refresh every 5 minutes
-  useEffect(() => {
-    recommendationIntervalRef.current = setInterval(() => {
-      console.log('Periodic recommendation refresh triggered');
-      fetchRecommendationsAutomatically();
-    }, 300000); // 5 minutes
+    initialize();
+
+    if (window.chrome && chrome.runtime) {
+      chrome.runtime.sendMessage('cohlihkpndpeoklcbgcgaobmoojpdhpg', { message: 'ping' }, (response) => {
+        if (chrome.runtime.lastError || !response) setExtensionInstalled(false);
+      });
+    } else {
+      setExtensionInstalled(false);
+    }
+
+    const loadModels = async () => {
+      try {
+        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+        setModelsLoaded(true);
+        showToast('Emotion detection models loaded successfully!');
+      } catch (err) {
+        console.warn('Failed to load local models:', err);
+        try {
+          await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
+          await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
+          setModelsLoaded(true);
+          showToast('Emotion detection models loaded from CDN!');
+        } catch (cdnErr) {
+          console.error('Error loading models from CDN:', cdnErr);
+          setError('Failed to load emotion detection models.');
+          showToast('Failed to load emotion detection models', 'error');
+        }
+      }
+    };
+    loadModels();
+
     return () => {
-      if (recommendationIntervalRef.current) clearInterval(recommendationIntervalRef.current);
+      stopWebcam();
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (updateIntervalRef.current) clearInterval(updateIntervalRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (webcamEnabled && modelsLoaded && videoRef.current) {
+      startWebcam();
+      showToast('Webcam enabled for mood detection!');
+    }
+    return () => {
+      if (webcamEnabled) stopWebcam();
+    };
+  }, [webcamEnabled, modelsLoaded]);
+
+  useEffect(() => {
+    if (webcamEnabled && modelsLoaded && videoRef.current) {
+      updateIntervalRef.current = setInterval(detectEmotions, 10000);
+      return () => {
+        if (updateIntervalRef.current) {
+          clearInterval(updateIntervalRef.current);
+          updateIntervalRef.current = null;
+        }
+      };
+    }
+  }, [webcamEnabled, modelsLoaded, correctedMood]);
 
   const detectEmotions = async () => {
     if (!videoRef.current || !webcamEnabled || !modelsLoaded) {
@@ -241,88 +300,6 @@ const Dashboard = () => {
     }
   };
 
-  useEffect(() => {
-    const initialize = async () => {
-      try {
-        const [screenTimeData, moodData, recData, userData] = await Promise.all([getScreenTime(), getLatestMood(), getRecommendations(), getUser()]);
-        setScreenTimeData(screenTimeData.sort((a, b) => new Date(b.date) - new Date(a.date)));
-        setLastSavedMood(moodData);
-        setRecommendations(recData);
-        setSpotifyToken(userData.spotifyToken?.accessToken || '');
-        setDeviceId(userData.deviceId || ''); // Assuming deviceId is returned from getUser
-        await fetchLeaderboard();
-      } catch (err) {
-        setError(err.message || 'Failed to initialize data');
-        showToast(err.message || 'Failed to initialize data', 'error');
-        if (err.message.includes('token')) {
-          await handleSpotifyConnect();
-        }
-      }
-
-      if (window.chrome && chrome.runtime) {
-        chrome.runtime.sendMessage('cohlihkpndpeoklcbgcgaobmoojpdhpg', { message: 'ping' }, (response) => {
-          if (chrome.runtime.lastError || !response) setExtensionInstalled(false);
-        });
-      } else {
-        setExtensionInstalled(false);
-      }
-
-      const loadModels = async () => {
-        try {
-          await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-          await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-          await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
-          setModelsLoaded(true);
-          showToast('Emotion detection models loaded successfully!');
-        } catch (err) {
-          console.warn('Failed to load local models:', err);
-          try {
-            await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
-            await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
-            await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
-            setModelsLoaded(true);
-            showToast('Emotion detection models loaded from CDN!');
-          } catch (cdnErr) {
-            console.error('Error loading models from CDN:', cdnErr);
-            setError('Failed to load emotion detection models.');
-            showToast('Failed to load emotion detection models', 'error');
-          }
-        }
-      };
-      loadModels();
-    };
-
-    initialize();
-
-    return () => {
-      stopWebcam();
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (recommendationIntervalRef.current) clearInterval(recommendationIntervalRef.current);
-    };
-  }, [localStorage.getItem('userId')]);
-
-  useEffect(() => {
-    if (webcamEnabled && modelsLoaded && videoRef.current) {
-      startWebcam();
-      showToast('Webcam enabled for mood detection!');
-    }
-    return () => {
-      if (webcamEnabled) stopWebcam();
-    };
-  }, [webcamEnabled, modelsLoaded]);
-
-  useEffect(() => {
-    if (webcamEnabled && modelsLoaded && videoRef.current) {
-      detectionIntervalRef.current = setInterval(detectEmotions, 10000);
-      return () => {
-        if (detectionIntervalRef.current) {
-          clearInterval(detectionIntervalRef.current);
-          detectionIntervalRef.current = null;
-        }
-      };
-    }
-  }, [webcamEnabled, modelsLoaded, correctedMood]);
-
   const startWebcam = async () => {
     if (!modelsLoaded) {
       setError('Models are still loading, please wait...');
@@ -357,9 +334,9 @@ const Dashboard = () => {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    if (detectionIntervalRef.current) {
-      clearInterval(detectionIntervalRef.current);
-      detectionIntervalRef.current = null;
+    if (updateIntervalRef.current) {
+      clearInterval(updateIntervalRef.current);
+      updateIntervalRef.current = null;
     }
     if (videoRef.current) videoRef.current.srcObject = null;
     setWebcamEnabled(false);
@@ -556,7 +533,6 @@ const Dashboard = () => {
       } else {
         setCurrentPlaylist({ id: '', name: '', offset: 0 });
       }
-      await fetchRecommendationsAutomatically();
     };
     initializePlaylist();
   }, [latestRecommendation]);
