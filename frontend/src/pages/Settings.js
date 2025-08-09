@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getUser, saveSettings } from "../utils/api";
+import { requestNotificationPermission, scheduleNotifications } from "../utils/notifications";
 
 const Settings = () => {
   const [webcamEnabled, setWebcamEnabled] = useState(false);
@@ -14,20 +15,30 @@ const Settings = () => {
         const prefs = user.preferences || {};
         setWebcamEnabled(prefs.webcamEnabled || false);
         setNotificationFrequency(prefs.notifyEvery || 'Off');
-        setShowNameOnLeaderboard(prefs.showNameOnLeaderboard || true);
+        setShowNameOnLeaderboard(prefs.showOnLeaderboard !== false); // Default to true
       } catch (error) {
         console.error('Failed to fetch settings:', error);
+        setMessage('Failed to load settings');
+        setTimeout(() => setMessage(''), 3000);
       }
     };
     fetchSettings();
+
+    // Request notification permission on component mount
+    requestNotificationPermission();
   }, []);
+
+  useEffect(() => {
+    // Schedule notifications whenever notificationFrequency changes
+    scheduleNotifications(notificationFrequency);
+  }, [notificationFrequency]);
 
   const handleSave = async () => {
     try {
       await saveSettings({
         webcamEnabled,
         notifyEvery: notificationFrequency,
-        showNameOnLeaderboard,
+        showOnLeaderboard: showNameOnLeaderboard,
       });
       setMessage('Settings saved successfully');
       setTimeout(() => setMessage(''), 3000);

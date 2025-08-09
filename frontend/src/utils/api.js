@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'http://localhost:5000', // Adjust to your backend URL
+  baseURL: 'http://localhost:5000',
   headers: {
     'Content-Type': 'application/json',
   },
@@ -50,7 +50,6 @@ export const getRecommendations = async () => {
       Authorization: `Bearer ${token}`,
     },
   });
-  // Trigger POST if no recent recommendations (e.g., last 5 minutes)
   const recommendations = response.data;
   if (!recommendations.length || (Date.now() - new Date(recommendations[0].timestamp).getTime() > 5 * 60 * 1000)) {
     await api.post('/recommendations', {}, {
@@ -105,7 +104,7 @@ export const getUser = async () => {
       Authorization: `Bearer ${token}`,
     },
   });
-  return response.data; // Expecting { username, email, ... }
+  return response.data;
 };
 
 export const savePlaylist = async (playlistId, data) => {
@@ -222,6 +221,7 @@ export const saveSettings = async (settingsData) => {
       Authorization: `Bearer ${token}`,
     },
   });
+  return response.data;
 };
 
 export const sendContactMessage = async (contactData) => {
