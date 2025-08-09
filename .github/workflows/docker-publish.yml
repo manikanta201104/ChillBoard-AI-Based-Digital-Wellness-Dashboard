@@ -1,18 +1,16 @@
-name: Docker
+name: Build & Push Backend to GHCR
 
 on:
-  schedule:
-    - cron: '17 9 * * *'
   push:
     branches: [ "main" ]
-    tags: [ 'v*.*.*' ] # Publish semver tags as releases
+    tags: [ 'v*.*.*' ] # Optional: Publish version tags as releases
   pull_request:
     branches: [ "main" ]
 
 env:
-  # GitHub Container Registry
+  # GitHub Container Registry settings
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-backend # Added "-backend" to make it clear
+  IMAGE_NAME: ${{ github.repository }}-backend # clear backend naming
 
 jobs:
   build:
@@ -27,38 +25,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Install cosign (for signing images)
+      # 2️⃣ Install cosign (for signing)
       - name: Install cosign
         if: github.event_name != 'pull_request'
-        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20
+        uses: sigstore/cosign-installer@v3
         with:
           cosign-release: 'v2.2.4'
 
       # 3️⃣ Set up Docker Buildx
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226
+        uses: docker/setup-buildx-action@v3
 
-      # 4️⃣ Login to GHCR
-      - name: Log in to GitHub Container Registry
+      # 4️⃣ Login to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 5️⃣ Extract metadata for Docker
+      # 5️⃣ Extract metadata for tagging
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@96383f45573cb7f253c731d3b3ab81c87ef81934
+        uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      # 6️⃣ Build and push Docker image (pointing to Backend folder)
+      # 6️⃣ Build and push Docker image from Backend folder
       - name: Build and push Docker image
         id: build-and-push
         uses: docker/build-push-action@v5
         with:
-          context: ./Backend  # backend folder path
+          context: ./Backend   # 👈 points to your backend folder
+          file: ./Backend/Dockerfile # 👈 ensures it uses backend Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
