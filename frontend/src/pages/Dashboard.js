@@ -368,8 +368,8 @@ const Dashboard = () => {
   };
 
   const startTimer = (duration) => {
-    const minutes = parseInt(duration);
-    setTimer(minutes * 60);
+    const seconds = parseInt(duration) * 60; // Convert minutes to seconds
+    setTimer(seconds);
     setTimerRunning(true);
     timerRef.current = setInterval(() => setTimer(prev => prev <= 0 ? (clearInterval(timerRef.current), setTimerRunning(false), 0) : prev - 1), 1000);
   };
@@ -393,6 +393,25 @@ const Dashboard = () => {
       const updatedRecommendations = await getRecommendations();
       setRecommendations(updatedRecommendations);
       showToast(`Recommendation ${accepted ? 'accepted' : 'declined'} successfully!`);
+
+      // Start timer based on accepted recommendation type
+      const latestRec = updatedRecommendations.find(rec => rec.recommendationId === recommendationId);
+      if (accepted && latestRec) {
+        const details = JSON.parse(latestRec.details || '{}');
+        switch (latestRec.type) {
+          case 'break':
+            startTimer(parseInt(details.match(/\d+/)[0]) || 5); // Default to 5 minutes if not parsed
+            break;
+          case 'activity':
+            if (details.message.includes('body stretch')) startTimer(2); // 2-minute body stretch
+            else if (details.message.includes('walk')) startTimer(10); // 10-minute walk
+            else if (details.message.includes('eye exercises')) startTimer(2); // 2-minute eye exercises
+            else if (details.message.includes('meditation')) startTimer(5); // 5-minute meditation
+            break;
+          default:
+            break;
+        }
+      }
     } catch (err) {
       setError('Failed to update recommendation');
       showToast('Failed to update recommendation', 'error');
@@ -625,7 +644,30 @@ const Dashboard = () => {
                     <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Reset Timer</button>
                   </div>
                 ) : (
-                  <button onClick={() => startTimer(latestRecommendation.details.match(/\d+/)[0])} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Start Timer</button>
+                  <button onClick={() => startTimer(parseInt(latestRecommendation.details.match(/\d+/)[0]) || 5)} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Start Timer</button>
+                )}
+              </div>
+            )}
+            {(latestRecommendation.type === 'activity' && !actionStatus) && (
+              <div className="mt-4 sm:w-full">
+                {timer !== null ? (
+                  <div>
+                    <p className="text-xl font-semibold text-gray-700 sm:text-lg">{formatTime(timer)}</p>
+                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Reset Timer</button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => {
+                      const duration = latestRecommendation.details.includes('body stretch') ? 2 :
+                        latestRecommendation.details.includes('walk') ? 10 :
+                        latestRecommendation.details.includes('eye exercises') ? 2 :
+                        latestRecommendation.details.includes('meditation') ? 5 : 0;
+                      if (duration > 0) startTimer(duration);
+                    }}
+                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full"
+                  >
+                    Start Timer
+                  </button>
                 )}
               </div>
             )}

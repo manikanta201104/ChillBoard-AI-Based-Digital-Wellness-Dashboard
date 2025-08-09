@@ -72,13 +72,12 @@ router.post('/login', async (req, res) => {
     };
     await user.save();
 
-    // Signal frontend to clear old challenge data and set new userId
     logger.info('User logged in successfully', { email, userId: user.userId });
     res.status(200).json({ 
       token: accessToken, 
       refreshToken, 
       userId: user.userId,
-      clearChallengeData: true // Flag to trigger state reset on frontend
+      clearChallengeData: true
     });
   } catch (error) {
     logger.error('Error during login:', error);
@@ -89,14 +88,19 @@ router.post('/login', async (req, res) => {
 // GET /auth/profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ userId: req.user.userId }).select('username email spotifyToken');
+    const user = await User.findOne({ userId: req.user.userId }).select('username email spotifyToken preferences');
     if (!user) {
       logger.warn('User not found', { userId: req.user.userId });
       return res.status(404).json({ message: 'User not found' });
     }
 
     logger.info('Profile fetched successfully', { userId: req.user.userId });
-    res.status(200).json({ username: user.username, email: user.email, spotifyToken: user.spotifyToken });
+    res.status(200).json({ 
+      username: user.username, 
+      email: user.email, 
+      spotifyToken: user.spotifyToken, 
+      preferences: user.preferences 
+    });
   } catch (error) {
     logger.error('Error fetching profile:', error);
     res.status(500).json({ message: 'Internal server error' });
@@ -148,9 +152,11 @@ router.post('/settings', authMiddleware, async (req, res) => {
     user.preferences = { webcamEnabled, notifyEvery, showOnLeaderboard };
     await user.save();
 
+    logger.info('Settings saved successfully', { userId });
     res.status(200).json({ message: 'Settings saved successfully' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    logger.error('Error saving settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
   }
 });
 

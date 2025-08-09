@@ -8,7 +8,7 @@ const Challenges = () => {
   const [selectedChallengeId, setSelectedChallengeId] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [initialLoad, setInitialLoad] = useState(true); // Separate initial load state
+  const [initialLoad, setInitialLoad] = useState(true);
   const userId = localStorage.getItem('userId');
 
   const fetchLeaderboard = async (challengeId, retries = 3) => {
@@ -17,12 +17,12 @@ const Challenges = () => {
       try {
         const data = await getLeaderboard(challengeId);
         setLeaderboard(data);
-        if (error) setError(''); // Clear error on success
+        if (error) setError('');
         setLoading(false);
         return;
       } catch (err) {
         setError(`Failed to fetch leaderboard (Attempt ${attempt}/${retries}): ${err.message}`);
-        if (attempt < retries) await new Promise(resolve => setTimeout(resolve, 2000)); // Retry after 2s
+        if (attempt < retries) await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
     setLoading(false);
@@ -47,30 +47,28 @@ const Challenges = () => {
         ? joined[0]
         : null;
       setSelectedChallengeId(latestJoined);
-      if (latestJoined) await fetchLeaderboard(latestJoined);
+      if (latestJoined) {
+        await fetchLeaderboard(latestJoined);
+      }
     } catch (err) {
-      setError(err.message || 'Failed to fetch challenges');
+      setError(err.message || 'Failed to fetch challenges. Please ensure screen time data is being recorded.');
     } finally {
       setLoading(false);
-      setInitialLoad(false); // Mark initial load complete
+      setInitialLoad(false);
     }
   };
 
-  // Poll challenges every 10 seconds
+  // Poll challenges every 5 minutes
   useEffect(() => {
     if (!userId) return;
 
-    const pollChallenges = setInterval(() => {
-      fetchChallenges();
-    }, 10000); // 10 seconds interval
+    fetchChallenges(); // Initial fetch
+    const pollChallenges = setInterval(fetchChallenges, 5 * 60 * 1000); // 5 minutes
 
-    // Initial fetch
-    fetchChallenges();
-
-    return () => clearInterval(pollChallenges); // Cleanup interval on unmount
+    return () => clearInterval(pollChallenges);
   }, [userId]);
 
-  // Poll leaderboard every 10 seconds when a challenge is selected
+  // Poll leaderboard every 5 minutes when a challenge is selected
   useEffect(() => {
     if (!selectedChallengeId || !userId) {
       setLeaderboard([]);
@@ -78,12 +76,12 @@ const Challenges = () => {
       return;
     }
 
-    const pollLeaderboard = setInterval(async () => {
-      await fetchLeaderboard(selectedChallengeId);
-    }, 10000); // 10 seconds interval
     fetchLeaderboard(selectedChallengeId); // Initial fetch
-    localStorage.setItem('selectedChallengeId', selectedChallengeId);
+    const pollLeaderboard = setInterval(() => {
+      fetchLeaderboard(selectedChallengeId);
+    }, 5 * 60 * 1000); // 5 minutes
 
+    localStorage.setItem('selectedChallengeId', selectedChallengeId);
     return () => clearInterval(pollLeaderboard);
   }, [selectedChallengeId, userId]);
 
@@ -95,8 +93,9 @@ const Challenges = () => {
       setJoinedChallenges(updatedJoined);
       setSelectedChallengeId(challengeId);
       await fetchLeaderboard(challengeId);
-      setError('Successfully joined challenge!');
+      setError('Successfully joined challenge! Progress updates daily at midnight.');
       localStorage.setItem('joinedChallenges', JSON.stringify(Array.from(updatedJoined)));
+      await fetchChallenges(); // Refresh challenges to show initial reduction
     } catch (err) {
       setError(err.message || 'Failed to join challenge');
     } finally {
@@ -161,7 +160,9 @@ const Challenges = () => {
                 </h2>
                 <p className="text-gray-700 mt-2 sm:text-sm">{challenge.description || 'No description available'}</p>
                 {isJoined ? (
-                  <p className="mt-4 text-green-600 sm:text-sm">Joined - {reduction.toFixed(1)} hours reduced</p>
+                  <p className="mt-4 text-green-600 sm:text-sm">
+                    Joined - {reduction.toFixed(1)} hours reduced (updates daily at midnight)
+                  </p>
                 ) : (
                   <button
                     onClick={() => handleJoinChallenge(challenge.challengeId)}
