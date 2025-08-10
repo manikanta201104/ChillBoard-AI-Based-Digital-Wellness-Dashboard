@@ -34,7 +34,8 @@ app.use(cors({
   origin: [
     'http://localhost:3000',
     'https://chillboard.vercel.app', // ✅ No trailing slash
-    'https://chillboard-6uoj.onrender.com'
+    'https://chillboard-6uoj.onrender.com',
+    'chrome-extension://cohlihkpndpeoklcbgcgaobmoojpdhpg' 
   ],
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],

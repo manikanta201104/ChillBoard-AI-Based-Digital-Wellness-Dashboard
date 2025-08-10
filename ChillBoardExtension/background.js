@@ -84,11 +84,48 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function notifyUser(message) {
+// Enhanced notification system with better visual feedback
+function notifyUser(message, type = 'info') {
   console.log('Notification:', message);
-  chrome.action.setBadgeText({ text: '!' });
-  chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });
-  setTimeout(() => chrome.action.setBadgeText({ text: '' }), 5000);
+  
+  // Set appropriate badge based on notification type
+  switch (type) {
+    case 'error':
+      chrome.action.setBadgeText({ text: '!' });
+      chrome.action.setBadgeBackgroundColor({ color: '#ff0000' });
+      break;
+    case 'warning':
+      chrome.action.setBadgeText({ text: '⚠' });
+      chrome.action.setBadgeBackgroundColor({ color: '#ff8c00' });
+      break;
+    case 'success':
+      chrome.action.setBadgeText({ text: '✓' });
+      chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+      break;
+    case 'sync':
+      chrome.action.setBadgeText({ text: '↻' });
+      chrome.action.setBadgeBackgroundColor({ color: '#2196F3' });
+      break;
+    default:
+      chrome.action.setBadgeText({ text: 'i' });
+      chrome.action.setBadgeBackgroundColor({ color: '#666666' });
+  }
+  
+  // Clear badge after appropriate time based on message importance
+  const clearTime = type === 'error' ? 10000 : type === 'warning' ? 7000 : 5000;
+  setTimeout(() => chrome.action.setBadgeText({ text: '' }), clearTime);
+}
+
+// Enhanced tracking status indication
+function updateTrackingBadge() {
+  if (isTracking && currentTabUrl) {
+    chrome.action.setBadgeText({ text: '●' });
+    chrome.action.setBadgeBackgroundColor({ color: '#4CAF50' });
+    chrome.action.setTitle({ title: `ChillBoard - Tracking: ${currentTabUrl}` });
+  } else {
+    chrome.action.setBadgeText({ text: '' });
+    chrome.action.setTitle({ title: 'ChillBoard - Not tracking' });
+  }
 }
 
 function combineTabUsageByUrl(tabUsageArray) {
@@ -132,6 +169,9 @@ function initializeStorage() {
       }
     }
 
+    // Update initial badge state
+    updateTrackingBadge();
+
     if (result.jwt) await fetchServerData(result.jwt, currentDate);
     setTimeout(checkFocus, 1000);
     startNetworkPolling();
@@ -163,14 +203,19 @@ async function resetDailyData(newDate) {
     activeTabTimer = null;
   }
   await saveAllData();
+  updateTrackingBadge();
+  notifyUser('Daily data reset', 'info');
   setTimeout(syncData, 2000);
 }
 
 async function fetchServerData(jwt, date, retries = 3) {
+  notifyUser('Syncing data...', 'sync');
+  
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       if (!isOnline) {
         console.log('Offline, skipping fetch attempt');
+        notifyUser('Offline - using local data', 'warning');
         return false;
       }
 
@@ -201,24 +246,25 @@ async function fetchServerData(jwt, date, retries = 3) {
         lastSyncedTabUsage = [...combinedTabUsage];
         await saveAllData();
       }
+      notifyUser('Data synced successfully', 'success');
       return true;
     } catch (error) {
       if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
         console.warn(`Fetch attempt ${attempt} failed: Network error (offline or server unavailable)`);
         if (attempt === retries) {
-          notifyUser('Network error. Using local data.');
+          notifyUser('Network error - using local data', 'warning');
           return false;
         }
       } else if (error.name === 'AbortError') {
         console.warn(`Fetch attempt ${attempt} timed out`);
         if (attempt === retries) {
-          notifyUser('Server timeout. Using local data.');
+          notifyUser('Server timeout - using local data', 'warning');
           return false;
         }
       } else {
         console.error(`Fetch server data attempt ${attempt} failed:`, error.message);
         if (attempt === retries) {
-          notifyUser('Server sync failed. Using local data.');
+          notifyUser('Server sync failed - using local data', 'error');
           return false;
         }
       }
@@ -244,7 +290,7 @@ async function refreshJwt() {
     return data.token;
   } catch (error) {
     console.error('Error refreshing JWT:', error.message);
-    notifyUser('Session expired. Please log in again.');
+    notifyUser('Session expired - please log in', 'error');
     await clearStorageData(['jwt', 'refreshToken']);
     return null;
   }
@@ -319,6 +365,7 @@ function startTracking() {
   lastUpdateTime = Date.now();
   console.log('Started tracking for tab:', { currentTabId, url: currentTabUrl });
   startActiveTabTimer();
+  updateTrackingBadge(); // Update badge when tracking starts
   saveAllData();
 }
 
@@ -329,6 +376,7 @@ function stopTracking() {
   lastUpdateTime = null;
   clearInterval(activeTabTimer);
   activeTabTimer = null;
+  updateTrackingBadge(); // Update badge when tracking stops
   saveAllData();
 }
 
@@ -391,6 +439,7 @@ chrome.tabs.onActivated.addListener(activeInfo => {
     if (isTracking) {
       tabStartTime = Date.now();
       startActiveTabTimer();
+      updateTrackingBadge(); // Update badge with new tab info
     }
   });
 });
@@ -402,6 +451,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       currentTabUrl = extractHostname(tab.url);
       tabStartTime = Date.now();
       startActiveTabTimer();
+      updateTrackingBadge(); // Update badge with new URL
     } else stopTracking();
   }
 });
@@ -433,7 +483,7 @@ async function syncData(maxRetries = 3) {
         offlineQueue.push(deltaData);
         await saveAllData();
       }
-      notifyUser('Please log in to sync data.');
+      notifyUser('Please log in to sync data', 'warning');
       return;
     }
 
@@ -455,11 +505,13 @@ async function syncData(maxRetries = 3) {
         offlineQueue.push({ totalTime: deltaTotalTime, tabs: batchedTabUsage, date: currentDate });
         await saveAllData();
       }
-      notifyUser('Offline. Data will sync when online.');
+      notifyUser('Offline - data queued for sync', 'warning');
       return;
     }
 
     if (dataToSync.length === 0) return;
+
+    notifyUser('Syncing data...', 'sync');
 
     for (const item of dataToSync) {
       const decodedJwt = jwtDecode(jwt);
@@ -486,7 +538,7 @@ async function syncData(maxRetries = 3) {
               }
               offlineQueue.push(item);
               await saveAllData();
-              notifyUser('Session expired. Please log in again.');
+              notifyUser('Session expired - please log in', 'error');
               return;
             }
             throw new Error(`Sync failed: ${response.status} - ${response.statusText}`);
@@ -499,14 +551,14 @@ async function syncData(maxRetries = 3) {
             if (attempt === maxRetries) {
               offlineQueue.push(item);
               await saveAllData();
-              notifyUser('Sync timed out. Data queued for retry.');
+              notifyUser('Sync timed out - data queued', 'warning');
             }
           } else {
             console.error(`Sync attempt ${attempt} failed for ${item.date}:`, error.message);
             if (attempt === maxRetries) {
               offlineQueue.push(item);
               await saveAllData();
-              notifyUser('Sync failed. Data queued for retry.');
+              notifyUser('Sync failed - data queued', 'error');
             }
           }
           if (attempt < maxRetries) await sleep(2000 * attempt);
@@ -518,6 +570,8 @@ async function syncData(maxRetries = 3) {
     lastSyncedTabUsage = [...tabUsage];
     offlineQueue = offlineQueue.filter(item => item.date !== currentDate);
     await saveAllData();
+    
+    notifyUser('Sync completed successfully', 'success');
   } catch (error) {
     console.error('Sync error:', error.message);
     const deltaTotalTime = totalTime - lastSyncedTotalTime;
@@ -527,7 +581,7 @@ async function syncData(maxRetries = 3) {
       offlineQueue.push(deltaData);
       await saveAllData();
     }
-    notifyUser('Sync failed. Data queued for retry.');
+    notifyUser('Sync failed - data queued', 'error');
   }
 }
 
@@ -539,10 +593,11 @@ function startNetworkPolling() {
     if (wasOnline !== isOnline) {
       if (isOnline) {
         console.log('Back online, attempting sync');
+        notifyUser('Back online - syncing data', 'info');
         setTimeout(syncData, 2000);
       } else {
         console.log('Went offline');
-        notifyUser('Offline mode active.');
+        notifyUser('Offline mode active', 'warning');
       }
     }
   }, 5000);
