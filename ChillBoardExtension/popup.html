@@ -7,103 +7,22 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <!-- Login Container -->
   <div id="login-container" style="display: none;">
-    <div class="header">
-      <div class="logo">
-        <div class="logo-icon">📊</div>
-        <h1>ChillBoard</h1>
-      </div>
-      <p class="subtitle">Track your digital wellness</p>
-    </div>
-    
-    <div class="login-form">
-      <div class="input-group">
-        <input type="email" id="email" placeholder="Enter your email" required>
-        <span class="input-icon">📧</span>
-      </div>
-      
-      <div class="input-group">
-        <input type="password" id="password" placeholder="Enter your password" required>
-        <span class="input-icon">🔒</span>
-      </div>
-      
-      <button id="login-btn" class="btn-primary">
-        <span class="btn-text">Login</span>
-        <span class="btn-loading" style="display: none;">...</span>
-      </button>
-      
-      <p id="login-error" class="error-message"></p>
-    </div>
+    <h1>ChillBoard Login</h1>
+    <input type="email" id="email" placeholder="Email">
+    <input type="password" id="password" placeholder="Password">
+    <button id="login-btn">Login</button>
+    <p id="login-error" style="color: red;"></p>
   </div>
-
-  <!-- Stats Container -->
-  <div id="stats-container" style="display: block;">
-    <div class="header">
-      <div class="logo">
-        <div class="logo-icon">📊</div>
-        <h1>ChillBoard</h1>
-      </div>
-      <div class="user-info">
-        <span class="user-avatar">👤</span>
-      </div>
-    </div>
-
-    <div class="stats-grid">
-      <div class="stat-card primary">
-        <div class="stat-icon">⏰</div>
-        <div class="stat-content">
-          <h3>Screen Time</h3>
-          <span id="total-time" class="stat-value">0m</span>
-        </div>
-      </div>
-      
-      <div class="stat-card secondary">
-        <div class="stat-icon">🔗</div>
-        <div class="stat-content">
-          <h3>Tabs Visited</h3>
-          <span id="tab-count" class="stat-value">0</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="tracking-status-section">
-      <div class="tracking-info">
-        <div class="tracking-badge">
-          <span class="tracking-icon">📡</span>
-          <span>Status: <span id="tracking-status" class="status-inactive">Inactive</span></span>
-        </div>
-        <div class="current-tab-info">
-          <span class="current-tab-label">Current:</span>
-          <span id="current-tab" class="current-tab-url">No active tab</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="tab-usage-section">
-      <h3 class="section-title">Most Visited Sites</h3>
-      <ul id="tab-usage" class="tab-list">
-        <li class="tab-entry">
-          <span class="tab-url">Loading...</span>
-          <span class="tab-time">0m</span>
-        </li>
-      </ul>
-    </div>
-
-    <div class="actions">
-      <button id="open-webapp-btn" class="btn-secondary">
-        <span class="btn-icon">🚀</span>
-        Open Dashboard
-      </button>
-      <button id="logout-btn" class="btn-outline">
-        <span class="btn-icon">🚪</span>
-        Logout
-      </button>
-    </div>
-
-    <p id="loading-message" class="loading-message"></p>
+  <div id="stats-container" style="display: none;">
+    <h1>ChillBoard</h1>
+    <p>Today's Screen Time: <span id="total-time">0m</span></p>
+    <p>Total Tabs Visited: <span id="tab-count">0</span></p>
+    <ul id="tab-usage"></ul>
+    <button id="logout-btn">Logout</button>
+    <button id="open-webapp-btn">Open Web App</button>
+    <p id="loading-message" style="color: blue;"></p>
   </div>
-
   <script src="popup.js"></script>
 </body>
 </html>
