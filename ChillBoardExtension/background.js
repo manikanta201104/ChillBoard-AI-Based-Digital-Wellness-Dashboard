@@ -174,7 +174,7 @@ async function fetchServerData(jwt, date, retries = 3) {
         return false;
       }
 
-      const response = await fetch('http://localhost:5000/screen-time', {
+      const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${jwt}` },
         signal: AbortSignal.timeout(20000)
@@ -232,7 +232,7 @@ async function refreshJwt() {
     const result = await getStorageData(['refreshToken']);
     const refreshToken = result.refreshToken;
     if (!refreshToken) throw new Error('No refresh token available');
-    const response = await fetch('http://localhost:5000/screen-time/refresh-token', {
+    const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time/refresh-token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
@@ -470,7 +470,7 @@ async function syncData(maxRetries = 3) {
         try {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 20000);
-          const response = await fetch('http://localhost:5000/screen-time', {
+          const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
             body: JSON.stringify({ userId, date: item.date, totalTime: item.totalTime, tabs: item.tabs }),
@@ -568,7 +568,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'success', isTracking, currentTabUrl });
     return true;
   } else if (request.action === 'openWebApp') {
-    chrome.tabs.create({ url: 'http://localhost:5000' });
+    chrome.tabs.create({ url: 'https://chillboard-6uoj.onrender.com' });
     sendResponse({ success: true });
     return true;
   }
