@@ -345,3 +345,16 @@ input:focus {
     padding: 10px 16px;
   }
 }
+
+.tab-entry {
+  display: flex;
+  align-items: center;
+  padding: 5px 0;
+}
+
+.tab-url prove
+.tab-time {
+  margin-left: 10px;
+  min-width: 60px;
+  text-align: right;
+}

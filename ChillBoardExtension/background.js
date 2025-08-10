@@ -2,7 +2,7 @@ let isTracking = false;
 let totalTime = 0;
 let currentTabId = null;
 let tabStartTime = null;
-let tabUsage = []; // Now includes { tabId, url, timeSpent, faviconUrl }
+let tabUsage = []; // Now includes { tabId, url, timeSpent }
 let lastSyncDate = new Date().toISOString().split('T')[0];
 let offlineQueue = [];
 let activeTabTimer = null;
@@ -30,38 +30,13 @@ function extractHostname(url) {
   try {
     if (!url || typeof url !== 'string') return 'unknown';
     if (url.startsWith('chrome://') || url.startsWith('chrome-extension://')) return 'chrome';
-    const urlObj = new URL(url);
-    return urlObj.hostname;
+    // Ensure the URL has a protocol; prepend 'https://' if missing
+    const validUrl = url.match(/^https?:\/\//) ? url : `https://${url}`;
+    const urlObj = new URL(validUrl);
+    return urlObj.hostname || 'unknown';
   } catch (error) {
     console.error('Error extracting hostname from:', url, error);
     return 'unknown';
-  }
-}
-
-async function getFaviconUrl(tabUrl) {
-  try {
-    if (!tabUrl || tabUrl.startsWith('chrome://')) return null;
-    
-    const hostname = extractHostname(tabUrl);
-    if (hostname === 'unknown') return null;
-    
-    // Try Chrome's favicon API first
-    const chromeFavicon = `chrome://favicon/size/16@1x/${tabUrl}`;
-    
-    // Fallback to Google's favicon service
-    const googleFavicon = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
-    
-    // Test Chrome favicon first
-    const response = await fetch(chromeFavicon, { 
-      method: 'GET',
-      signal: AbortSignal.timeout(5000)
-    });
-    
-    if (response.ok) return chromeFavicon;
-    return googleFavicon;
-  } catch (error) {
-    console.error('Error fetching favicon:', error);
-    return null;
   }
 }
 
@@ -99,8 +74,7 @@ function calculateTabUsageDelta(currentTabUsage, lastSyncedTabUsage) {
   currentTabUsage.forEach(tab => deltaMap.set(tab.url, { 
     tabId: tab.tabId, 
     url: tab.url, 
-    timeSpent: tab.timeSpent,
-    faviconUrl: tab.faviconUrl 
+    timeSpent: tab.timeSpent
   }));
   lastSyncedTabUsage.forEach(tab => {
     if (deltaMap.has(tab.url)) {
@@ -162,13 +136,11 @@ function combineTabUsageByUrl(tabUsageArray) {
     if (urlMap.has(tab.url)) {
       const existing = urlMap.get(tab.url);
       existing.timeSpent += tab.timeSpent;
-      if (tab.faviconUrl) existing.faviconUrl = tab.faviconUrl;
     } else {
       urlMap.set(tab.url, { 
         tabId: tab.tabId, 
         url: tab.url, 
-        timeSpent: tab.timeSpent,
-        faviconUrl: tab.faviconUrl 
+        timeSpent: tab.timeSpent
       });
     }
   });
@@ -275,8 +247,7 @@ async function fetchServerData(jwt, date, retries = 3) {
         const combinedTabUsage = combineTabUsageByUrl(todayData.tabs.map(tab => ({
           tabId: tab.tabId || null,
           url: tab.url,
-          timeSpent: tab.timeSpent,
-          faviconUrl: tab.faviconUrl
+          timeSpent: tab.timeSpent
         })));
         totalTime = todayData.totalTime;
         tabUsage = combinedTabUsage;
@@ -432,17 +403,14 @@ async function updateTabTime() {
   if (timeSpent >= 1) {
     totalTime += timeSpent;
     let existingTab = tabUsage.find(entry => entry.url === currentTabUrl);
-    const faviconUrl = await getFaviconUrl(currentTabUrl);
     
     if (existingTab) {
       existingTab.timeSpent += timeSpent;
-      if (faviconUrl) existingTab.faviconUrl = faviconUrl;
     } else {
       tabUsage.push({ 
         tabId: currentTabId, 
         url: currentTabUrl, 
-        timeSpent,
-        faviconUrl 
+        timeSpent
       });
     }
     saveAllData();
@@ -490,15 +458,11 @@ chrome.tabs.onActivated.addListener(activeInfo => {
       startActiveTabTimer();
       updateTrackingBadge();
     }
-    const faviconUrl = await getFaviconUrl(tab.url);
-    if (faviconUrl) {
-      tabUsage.push({
-        tabId: currentTabId,
-        url: currentTabUrl,
-        timeSpent: 0,
-        faviconUrl
-      });
-    }
+    tabUsage.push({
+      tabId: currentTabId,
+      url: currentTabUrl,
+      timeSpent: 0
+    });
   });
 });
 
@@ -510,15 +474,6 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       tabStartTime = Date.now();
       startActiveTabTimer();
       updateTrackingBadge();
-      getFaviconUrl(tab.url).then(faviconUrl => {
-        if (faviconUrl) {
-          const existingTab = tabUsage.find(entry => entry.url === currentTabUrl);
-          if (existingTab) {
-            existingTab.faviconUrl = faviconUrl;
-            saveAllData();
-          }
-        }
-      });
     } else stopTracking();
   }
 });
@@ -602,8 +557,7 @@ async function syncData(maxRetries = 3) {
               tabs: item.tabs.map(tab => ({
                 tabId: tab.tabId,
                 url: tab.url,
-                timeSpent: tab.timeSpent,
-                faviconUrl: tab.faviconUrl
+                timeSpent: tab.timeSpent
               }))
             }),
             signal: controller.signal
@@ -637,7 +591,7 @@ async function syncData(maxRetries = 3) {
             console.error(`Sync attempt ${attempt} failed for ${item.date}:`, error.message);
             if (attempt === maxRetries) {
               offlineQueue.push(item);
-              await saveAllData();
+              saveAllData();
               notifyUser('Sync failed - data queued', 'error');
             }
           }
