@@ -29,18 +29,35 @@ export const logger = winston.createLogger ({
 
 const app = express ();
 
-// Configure CORS to allow Chrome extension origin
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'https://chillboard.vercel.app', // ✅ No trailing slash
-    'https://chillboard-6uoj.onrender.com',
-    'chrome-extension://cohlihkpndpeoklcbgcgaobmoojpdhpg' 
-  ],
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl)
+    if (!origin) return callback(null, true);
+
+    // Allow any Chrome extension origin
+    if (origin.startsWith('chrome-extension://')) {
+      return callback(null, true);
+    }
+
+    // Allow these specific web origins
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'https://chillboard.vercel.app',
+      'https://chillboard-6uoj.onrender.com'
+    ];
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    // Block everything else
+    return callback(new Error('Not allowed by CORS'));
+  },
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true // ✅ Allow cookies/auth headers if needed
+  credentials: true
 }));
+
 
 
 app.use (express.json ());

@@ -2,7 +2,7 @@ let isTracking = false;
 let totalTime = 0;
 let currentTabId = null;
 let tabStartTime = null;
-let tabUsage = [];
+let tabUsage = []; // Now includes { tabId, url, timeSpent, faviconUrl }
 let lastSyncDate = new Date().toISOString().split('T')[0];
 let offlineQueue = [];
 let activeTabTimer = null;
@@ -38,6 +38,33 @@ function extractHostname(url) {
   }
 }
 
+async function getFaviconUrl(tabUrl) {
+  try {
+    if (!tabUrl || tabUrl.startsWith('chrome://')) return null;
+    
+    const hostname = extractHostname(tabUrl);
+    if (hostname === 'unknown') return null;
+    
+    // Try Chrome's favicon API first
+    const chromeFavicon = `chrome://favicon/size/16@1x/${tabUrl}`;
+    
+    // Fallback to Google's favicon service
+    const googleFavicon = `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
+    
+    // Test Chrome favicon first
+    const response = await fetch(chromeFavicon, { 
+      method: 'GET',
+      signal: AbortSignal.timeout(5000)
+    });
+    
+    if (response.ok) return chromeFavicon;
+    return googleFavicon;
+  } catch (error) {
+    console.error('Error fetching favicon:', error);
+    return null;
+  }
+}
+
 function getStorageData(keys) {
   return new Promise(resolve => {
     chrome.storage.local.get(keys, result => {
@@ -69,7 +96,12 @@ function clearStorageData(keys) {
 
 function calculateTabUsageDelta(currentTabUsage, lastSyncedTabUsage) {
   const deltaMap = new Map();
-  currentTabUsage.forEach(tab => deltaMap.set(tab.url, { tabId: tab.tabId, url: tab.url, timeSpent: tab.timeSpent }));
+  currentTabUsage.forEach(tab => deltaMap.set(tab.url, { 
+    tabId: tab.tabId, 
+    url: tab.url, 
+    timeSpent: tab.timeSpent,
+    faviconUrl: tab.faviconUrl 
+  }));
   lastSyncedTabUsage.forEach(tab => {
     if (deltaMap.has(tab.url)) {
       const current = deltaMap.get(tab.url);
@@ -84,11 +116,9 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Enhanced notification system with better visual feedback
 function notifyUser(message, type = 'info') {
   console.log('Notification:', message);
   
-  // Set appropriate badge based on notification type
   switch (type) {
     case 'error':
       chrome.action.setBadgeText({ text: '!' });
@@ -111,12 +141,10 @@ function notifyUser(message, type = 'info') {
       chrome.action.setBadgeBackgroundColor({ color: '#666666' });
   }
   
-  // Clear badge after appropriate time based on message importance
   const clearTime = type === 'error' ? 10000 : type === 'warning' ? 7000 : 5000;
   setTimeout(() => chrome.action.setBadgeText({ text: '' }), clearTime);
 }
 
-// Enhanced tracking status indication
 function updateTrackingBadge() {
   if (isTracking && currentTabUrl) {
     chrome.action.setBadgeText({ text: '●' });
@@ -131,8 +159,18 @@ function updateTrackingBadge() {
 function combineTabUsageByUrl(tabUsageArray) {
   const urlMap = new Map();
   tabUsageArray.forEach(tab => {
-    if (urlMap.has(tab.url)) urlMap.get(tab.url).timeSpent += tab.timeSpent;
-    else urlMap.set(tab.url, { tabId: tab.tabId, url: tab.url, timeSpent: tab.timeSpent });
+    if (urlMap.has(tab.url)) {
+      const existing = urlMap.get(tab.url);
+      existing.timeSpent += tab.timeSpent;
+      if (tab.faviconUrl) existing.faviconUrl = tab.faviconUrl;
+    } else {
+      urlMap.set(tab.url, { 
+        tabId: tab.tabId, 
+        url: tab.url, 
+        timeSpent: tab.timeSpent,
+        faviconUrl: tab.faviconUrl 
+      });
+    }
   });
   return Array.from(urlMap.values());
 }
@@ -169,7 +207,6 @@ function initializeStorage() {
       }
     }
 
-    // Update initial badge state
     updateTrackingBadge();
 
     if (result.jwt) await fetchServerData(result.jwt, currentDate);
@@ -238,7 +275,8 @@ async function fetchServerData(jwt, date, retries = 3) {
         const combinedTabUsage = combineTabUsageByUrl(todayData.tabs.map(tab => ({
           tabId: tab.tabId || null,
           url: tab.url,
-          timeSpent: tab.timeSpent
+          timeSpent: tab.timeSpent,
+          faviconUrl: tab.faviconUrl
         })));
         totalTime = todayData.totalTime;
         tabUsage = combinedTabUsage;
@@ -365,7 +403,7 @@ function startTracking() {
   lastUpdateTime = Date.now();
   console.log('Started tracking for tab:', { currentTabId, url: currentTabUrl });
   startActiveTabTimer();
-  updateTrackingBadge(); // Update badge when tracking starts
+  updateTrackingBadge();
   saveAllData();
 }
 
@@ -376,7 +414,7 @@ function stopTracking() {
   lastUpdateTime = null;
   clearInterval(activeTabTimer);
   activeTabTimer = null;
-  updateTrackingBadge(); // Update badge when tracking stops
+  updateTrackingBadge();
   saveAllData();
 }
 
@@ -387,15 +425,26 @@ function startActiveTabTimer() {
   }, 1000);
 }
 
-function updateTabTime() {
+async function updateTabTime() {
   if (!isTracking || !tabStartTime || !currentTabUrl || currentTabId === null) return;
   const currentTime = Date.now();
   const timeSpent = Math.floor((currentTime - tabStartTime) / 1000);
   if (timeSpent >= 1) {
     totalTime += timeSpent;
     let existingTab = tabUsage.find(entry => entry.url === currentTabUrl);
-    if (existingTab) existingTab.timeSpent += timeSpent;
-    else tabUsage.push({ tabId: currentTabId, url: currentTabUrl, timeSpent });
+    const faviconUrl = await getFaviconUrl(currentTabUrl);
+    
+    if (existingTab) {
+      existingTab.timeSpent += timeSpent;
+      if (faviconUrl) existingTab.faviconUrl = faviconUrl;
+    } else {
+      tabUsage.push({ 
+        tabId: currentTabId, 
+        url: currentTabUrl, 
+        timeSpent,
+        faviconUrl 
+      });
+    }
     saveAllData();
     tabStartTime = currentTime;
     lastUpdateTime = currentTime;
@@ -429,7 +478,7 @@ chrome.windows.onFocusChanged.addListener(windowId => {
 chrome.tabs.onActivated.addListener(activeInfo => {
   console.log('Tab activated:', activeInfo.tabId);
   if (isTracking && currentTabId !== null && tabStartTime) updateTabTime();
-  chrome.tabs.get(activeInfo.tabId, tab => {
+  chrome.tabs.get(activeInfo.tabId, async tab => {
     if (chrome.runtime.lastError || !tab || !tab.url || tab.url.startsWith('chrome://')) {
       stopTracking();
       return;
@@ -439,7 +488,16 @@ chrome.tabs.onActivated.addListener(activeInfo => {
     if (isTracking) {
       tabStartTime = Date.now();
       startActiveTabTimer();
-      updateTrackingBadge(); // Update badge with new tab info
+      updateTrackingBadge();
+    }
+    const faviconUrl = await getFaviconUrl(tab.url);
+    if (faviconUrl) {
+      tabUsage.push({
+        tabId: currentTabId,
+        url: currentTabUrl,
+        timeSpent: 0,
+        faviconUrl
+      });
     }
   });
 });
@@ -451,7 +509,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       currentTabUrl = extractHostname(tab.url);
       tabStartTime = Date.now();
       startActiveTabTimer();
-      updateTrackingBadge(); // Update badge with new URL
+      updateTrackingBadge();
+      getFaviconUrl(tab.url).then(faviconUrl => {
+        if (faviconUrl) {
+          const existingTab = tabUsage.find(entry => entry.url === currentTabUrl);
+          if (existingTab) {
+            existingTab.faviconUrl = faviconUrl;
+            saveAllData();
+          }
+        }
+      });
     } else stopTracking();
   }
 });
@@ -463,8 +530,8 @@ chrome.tabs.onRemoved.addListener(tabId => {
   }
 });
 
-const SYNC_INTERVAL_MS = 600000; // 10 minutes in milliseconds
-chrome.alarms.create('syncData', { periodInMinutes: 10 }); // Consistent with 600,000 ms
+const SYNC_INTERVAL_MS = 300000; // 5 minutes in milliseconds
+chrome.alarms.create('syncData', { periodInMinutes: 5 });
 
 chrome.alarms.onAlarm.addListener(alarm => {
   if (alarm.name === 'syncData') syncData();
@@ -478,7 +545,11 @@ async function syncData(maxRetries = 3) {
     const currentDate = new Date().toISOString().split('T')[0];
 
     if (!jwt) {
-      const deltaData = { totalTime: totalTime - lastSyncedTotalTime, tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), date: currentDate };
+      const deltaData = { 
+        totalTime: totalTime - lastSyncedTotalTime, 
+        tabs: calculateTabUsageDelta(tabUsage, lastSyncedTabUsage), 
+        date: currentDate 
+      };
       if (deltaData.totalTime > 0 || deltaData.tabs.length > 0) {
         offlineQueue.push(deltaData);
         await saveAllData();
@@ -493,7 +564,6 @@ async function syncData(maxRetries = 3) {
     }
 
     const deltaTotalTime = totalTime - lastSyncedTotalTime;
-    // Batch tab usage by aggregating into a single entry per URL
     const batchedTabUsage = combineTabUsageByUrl(calculateTabUsageDelta(tabUsage, lastSyncedTabUsage));
     const dataToSync = [
       ...offlineQueue,
@@ -525,7 +595,17 @@ async function syncData(maxRetries = 3) {
           const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
-            body: JSON.stringify({ userId, date: item.date, totalTime: item.totalTime, tabs: item.tabs }),
+            body: JSON.stringify({ 
+              userId, 
+              date: item.date, 
+              totalTime: item.totalTime, 
+              tabs: item.tabs.map(tab => ({
+                tabId: tab.tabId,
+                url: tab.url,
+                timeSpent: tab.timeSpent,
+                faviconUrl: tab.faviconUrl
+              }))
+            }),
             signal: controller.signal
           });
           clearTimeout(timeoutId);
@@ -585,7 +665,6 @@ async function syncData(maxRetries = 3) {
   }
 }
 
-// Poll network status since window is not available
 function startNetworkPolling() {
   setInterval(() => {
     const wasOnline = isOnline;
@@ -623,16 +702,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     sendResponse({ status: 'success', isTracking, currentTabUrl });
     return true;
   } else if (request.action === 'openWebApp') {
-    chrome.tabs.create({ url: 'https://chillboard-6uoj.onrender.com' });
+    chrome.tabs.create({ url: 'https://chillboard.vercel.app/' });
     sendResponse({ success: true });
     return true;
   }
   return false;
 });
 
-initializeStorage();
-
-// Focus-based idle detection with error handling
 function setupIdleDetection() {
   if (typeof chrome.idle !== 'undefined' && chrome.idle.setDetectionInterval) {
     chrome.idle.setDetectionInterval(30);
@@ -648,3 +724,5 @@ function setupIdleDetection() {
 
 chrome.runtime.onInstalled.addListener(setupIdleDetection);
 chrome.runtime.onStartup.addListener(setupIdleDetection);
+
+initializeStorage();
