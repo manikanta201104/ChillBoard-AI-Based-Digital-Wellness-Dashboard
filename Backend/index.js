@@ -11,65 +11,69 @@ import spotifyRoutes from './routes/spotify.js';
 import challengesRoutes from './routes/challenges.js';
 import contactRoutes from './routes/contact.js';
 
-dotenv.config();
+dotenv.config ();
 
 // Logger setup
-export const logger = winston.createLogger({
+export const logger = winston.createLogger ({
   level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
+  format: winston.format.combine (
+    winston.format.timestamp (),
+    winston.format.json ()
   ),
   transports: [
-    new winston.transports.Console(),
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
+    new winston.transports.Console (),
+    new winston.transports.File ({filename: 'logs/error.log', level: 'error'}),
+    new winston.transports.File ({filename: 'logs/combined.log'}),
   ],
 });
 
-const app = express();
+const app = express ();
 
 // Configure CORS to allow Chrome extension origin
-app.use(cors({
-  origin: [
-    'http://localhost:3000', // React frontend
-    'chrome-extension://<your-extension-id>', // Replace with your extension ID
-    '*'
-  ],
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS','DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-}));
+app.use (
+  cors ({
+    origin: [
+      'http://localhost:3000',
+      'chrome-extension://<your-extension-id>', // Replace with your extension ID
+      '*',
+      'https://chillboard.vercel.app/',
+      'https://chillboard-6uoj.onrender.com',
+    ],
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  })
+);
 
-app.use(express.json());
+app.use (express.json ());
 
-app.get('/test', (req, res) => {
-  logger.info('Received GET request at /test');
-  res.status(200).json({ message: 'Server is running' });
+app.get ('/test', (req, res) => {
+  logger.info ('Received GET request at /test');
+  res.status (200).json ({message: 'Server is running'});
 });
 
-app.patch('/test-patch', (req, res) => {
-  res.status(200).json({ message: 'PATCH request received' });
+app.patch ('/test-patch', (req, res) => {
+  res.status (200).json ({message: 'PATCH request received'});
 });
 
-app.use('/auth', authRoutes);
-app.use('/screen-time', screenTimeRoutes);
-app.use('/mood', moodRoutes);
-app.use('/recommendations', recommendationsRoutes);
-app.use('/ping', (req, res) => {
-  logger.info('Received GET request at /ping');
-  res.status(200).json({ message: 'Pong' });
+app.use ('/auth', authRoutes);
+app.use ('/screen-time', screenTimeRoutes);
+app.use ('/mood', moodRoutes);
+app.use ('/recommendations', recommendationsRoutes);
+app.use ('/ping', (req, res) => {
+  logger.info ('Received GET request at /ping');
+  res.status (200).json ({message: 'Pong'});
 });
-app.use('/spotify', spotifyRoutes);
-app.use('/challenges',challengesRoutes);
-app.use('/contact',contactRoutes);
+app.use ('/spotify', spotifyRoutes);
+app.use ('/challenges', challengesRoutes);
+app.use ('/contact', contactRoutes);
 
 // MongoDB Connection
 mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => logger.info('Connected to MongoDB'))
-  .catch((err) => logger.error('MongoDB connection error:', err));
+  .connect (process.env.MONGO_URI)
+  .then (() => logger.info ('Connected to MongoDB'))
+  .catch (err => logger.error ('MongoDB connection error:', err));
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+app.listen (PORT, () => {
+  logger.info (`Server running on port ${PORT}`);
 });
