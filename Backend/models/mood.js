@@ -2,7 +2,7 @@ import mongoose from 'mongoose';
 
 const moodSchema = new mongoose.Schema(
   {
-    userId: { type: String, required: true, unique: true }, // Unique identifier for a single document per user
+    userId: { type: String, required: true, unique: true }, // Unique identifier per user
     mood: {
       type: String,
       required: true,
@@ -14,7 +14,7 @@ const moodSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Index on userId for efficient lookup and uniqueness
+// Ensure only userId is indexed as unique
 moodSchema.index({ userId: 1 }, { unique: true });
 
 export default mongoose.model('Mood', moodSchema);
