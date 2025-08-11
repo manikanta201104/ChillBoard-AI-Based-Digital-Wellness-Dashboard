@@ -3,29 +3,21 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
-import * as faceapi from 'face-api.js';
-import {
-  getScreenTime,
-  saveMood,
-  getRecommendations,
-  updateRecommendation,
-  initiateSpotifyLogin,
-  getUser,
-  savePlaylist,
-  fetchNewPlaylist,
-  getLatestMood,
-  getLeaderboard,
-  getChallenges,
-  startPlayback,
-} from '../utils/api';
-import SpotifyPlayer from 'react-spotify-web-playback';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import {
+  getScreenTime,
+  getRecommendations,
+  updateRecommendation,
+  getUser,
+  getLeaderboard,
+  getChallenges,
+  initiateSpotifyLogin,
+} from '../utils/api';
+import MoodDetection from '../components/MoodDetection';
+import SpotifyPlayerComponent from '../components/SpotifyPlayerComponent';
 
 ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale);
-
-const MODEL_URL = '/models';
-const CDN_MODEL_URL = 'https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights/';
 
 const Dashboard = () => {
   const [screenTimeData, setScreenTimeData] = useState([]);
@@ -33,27 +25,13 @@ const Dashboard = () => {
   const [leaderboard, setLeaderboard] = useState([]);
   const [error, setError] = useState('');
   const [extensionInstalled, setExtensionInstalled] = useState(true);
-  const [webcamEnabled, setWebcamEnabled] = useState(false);
-  const [detectedMood, setDetectedMood] = useState('Detecting mood...');
-  const [lastSavedMood, setLastSavedMood] = useState(null);
-  const [correctedMood, setCorrectedMood] = useState('');
   const [timer, setTimer] = useState(null);
   const [timerRunning, setTimerRunning] = useState(false);
   const [actionStatus, setActionStatus] = useState(null);
-  const [spotifyToken, setSpotifyToken] = useState('');
-  const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '', offset: 0 });
-  const [modelsLoaded, setModelsLoaded] = useState(false);
-  const [detectionAttempts, setDetectionAttempts] = useState(0);
-  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [deviceId, setDeviceId] = useState('');
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
-  const lastSentRef = useRef({ timestamp: 0, mood: null, confidence: 0 });
   const timerRef = useRef(null);
   const updateIntervalRef = useRef(null);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
 
-  // Helper function to show toast notifications
   const showToast = (message, type = 'success') => {
     const options = {
       position: 'top-right',
@@ -68,63 +46,33 @@ const Dashboard = () => {
     else toast.info(message, options);
   };
 
-  // Debounced fetch recommendations
   const fetchRecommendationsAutomatically = useCallback(async () => {
     if (!localStorage.getItem('userId')) return;
 
     try {
-      const latestScreenTime = screenTimeData.length > 0 ? screenTimeData[0] : null;
-      let latestMood = lastSavedMood?.mood?.toLowerCase() || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()) || null;
-
-      if (!latestMood) {
-        const moodData = await getLatestMood();
-        latestMood = moodData?.mood?.toLowerCase() || null;
-        setLastSavedMood(moodData);
-      }
-
-      if (latestScreenTime && latestMood) {
-        const updatedRecommendations = await getRecommendations();
-        setRecommendations(updatedRecommendations);
-        const latestRec = updatedRecommendations[0];
-        if (latestRec?.type === 'music') {
-          const details = JSON.parse(latestRec.details);
-          setCurrentPlaylist({ id: details.playlistId, name: details.name, offset: 0 });
-        } else {
-          setCurrentPlaylist({ id: '', name: '', offset: 0 });
-        }
-      }
+      const updatedRecommendations = await getRecommendations();
+      setRecommendations(updatedRecommendations);
     } catch (err) {
       setError('Failed to fetch recommendations');
       showToast('Failed to fetch recommendations', 'error');
       console.error('Recommendation fetch error:', err);
-      if (err.message.includes('token')) {
-        await handleSpotifyConnect();
-      }
     }
-  }, [screenTimeData, lastSavedMood, detectedMood]);
+  }, []);
 
-  // Consolidated data polling
   useEffect(() => {
     const pollData = async () => {
       try {
-        const [screenTimeData, moodData, recData, userData] = await Promise.all([
+        const [screenTimeData, recData, userData] = await Promise.all([
           getScreenTime(),
-          getLatestMood(),
           getRecommendations(),
           getUser(),
         ]);
         setScreenTimeData(screenTimeData.sort((a, b) => new Date(b.date) - new Date(a.date)));
-        setLastSavedMood(moodData);
         setRecommendations(recData);
-        setSpotifyToken(userData.spotifyToken?.accessToken || '');
-        setDeviceId(userData.deviceId || '');
         await fetchLeaderboard();
       } catch (err) {
         setError(err.message || 'Failed to fetch data');
         showToast(err.message || 'Failed to fetch data', 'error');
-        if (err.message.includes('token')) {
-          await handleSpotifyConnect();
-        }
       }
     };
 
@@ -143,138 +91,11 @@ const Dashboard = () => {
       setExtensionInstalled(false);
     }
 
-    const loadModels = async () => {
-      try {
-        await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
-        await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
-        setModelsLoaded(true);
-        showToast('Emotion detection models loaded successfully!');
-      } catch (err) {
-        console.warn('Failed to load local models:', err);
-        try {
-          await faceapi.nets.tinyFaceDetector.loadFromUri(CDN_MODEL_URL);
-          await faceapi.nets.faceLandmark68Net.loadFromUri(CDN_MODEL_URL);
-          await faceapi.nets.faceExpressionNet.loadFromUri(CDN_MODEL_URL);
-          setModelsLoaded(true);
-          showToast('Emotion detection models loaded from CDN!');
-        } catch (cdnErr) {
-          console.error('Error loading models from CDN:', cdnErr);
-          setError('Failed to load emotion detection models.');
-          showToast('Failed to load emotion detection models', 'error');
-        }
-      }
-    };
-    loadModels();
-
     return () => {
-      stopWebcam();
       if (timerRef.current) clearInterval(timerRef.current);
       if (updateIntervalRef.current) clearInterval(updateIntervalRef.current);
     };
   }, []);
-
-  useEffect(() => {
-    if (webcamEnabled && modelsLoaded && videoRef.current) {
-      startWebcam();
-      showToast('Webcam enabled for mood detection!');
-    }
-    return () => {
-      if (webcamEnabled) stopWebcam();
-    };
-  }, [webcamEnabled, modelsLoaded]);
-
-  useEffect(() => {
-    if (webcamEnabled && modelsLoaded && videoRef.current) {
-      updateIntervalRef.current = setInterval(detectEmotions, 10000);
-      return () => {
-        if (updateIntervalRef.current) {
-          clearInterval(updateIntervalRef.current);
-          updateIntervalRef.current = null;
-        }
-      };
-    }
-  }, [webcamEnabled, modelsLoaded, correctedMood]);
-
-  const detectEmotions = async () => {
-    if (!videoRef.current || !webcamEnabled || !modelsLoaded) {
-      console.warn('Emotion detection aborted:', { videoReady: !!videoRef.current, webcamEnabled, modelsLoaded });
-      setDetectedMood('Emotion detection not ready. Check webcam and model loading.');
-      showToast('Emotion detection not ready', 'error');
-      return;
-    }
-
-    try {
-      const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
-        .withFaceLandmarks()
-        .withFaceExpressions();
-
-      setDetectionAttempts(prev => prev + 1);
-
-      if (detection && detection.expressions) {
-        const expressions = detection.expressions;
-        const moodMap = {
-          happy: expressions.happy || 0,
-          sad: expressions.sad || 0,
-          angry: expressions.angry || 0,
-          stressed: expressions.fearful || 0,
-          calm: expressions.neutral || 0,
-          neutral: expressions.neutral || 0,
-          surprised: expressions.surprised || 0,
-          disgusted: expressions.disgusted || 0,
-        };
-        const emotions = Object.keys(moodMap).map(key => ({
-          mood: key === 'surprised' ? 'happy' : key === 'disgusted' ? 'angry' : key,
-          confidence: moodMap[key],
-        }));
-        const dominantEmotion = emotions.reduce((prev, current) =>
-          prev.confidence > current.confidence ? prev : current,
-          { mood: 'unknown', confidence: 0 }
-        );
-
-        const moodText = correctedMood || dominantEmotion.mood;
-        const confidence = dominantEmotion.confidence;
-        const now = Date.now();
-        const timeSinceLast = (now - lastSentRef.current.timestamp) / 1000;
-        const confidenceDrop = lastSentRef.current.confidence ? Math.abs(confidence - lastSentRef.current.confidence) : 0;
-
-        if (confidence > 0.2) {
-          setDetectedMood(`You seem ${moodText} (Confidence: ${(confidence * 100).toFixed(2)}%)`);
-        } else {
-          setDetectedMood('Low confidence in emotion detection');
-          showToast('Low confidence in emotion detection', 'error');
-        }
-
-        if ((confidenceDrop > 0.2 || (timeSinceLast >= 30 && moodText !== lastSentRef.current.mood)) && now - lastSentRef.current.timestamp >= 10000) {
-          const moodToSend = { mood: moodText, confidence };
-          try {
-            await saveMood(moodToSend);
-            setLastSavedMood(moodToSend);
-            lastSentRef.current = { timestamp: now, mood: moodText, confidence };
-            showToast(`Mood ${moodText} saved successfully!`);
-            await fetchRecommendationsAutomatically();
-          } catch (err) {
-            console.error('Error sending mood to backend:', err);
-            setError('Failed to send mood data to backend.');
-            showToast('Failed to send mood data', 'error');
-          }
-        }
-
-        setDetectionAttempts(0);
-      } else if (detectionAttempts >= 10) {
-        setDetectedMood('Still no face detected. Ensure good lighting and face the camera directly.');
-        showToast('Still no face detected', 'error');
-      } else {
-        setDetectedMood('No face detected. Please center your face in the frame.');
-        showToast('No face detected', 'error');
-      }
-    } catch (err) {
-      console.error('Error during emotion detection:', err);
-      setDetectedMood('Error detecting emotions');
-      showToast('Error detecting emotions', 'error');
-    }
-  };
 
   const fetchLeaderboard = async () => {
     setLeaderboardLoading(true);
@@ -297,73 +118,6 @@ const Dashboard = () => {
       setLeaderboard([]);
     } finally {
       setLeaderboardLoading(false);
-    }
-  };
-
-  const startWebcam = async () => {
-    if (!modelsLoaded) {
-      setError('Models are still loading, please wait...');
-      showToast('Models are still loading', 'error');
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } });
-      streamRef.current = stream;
-      videoRef.current.srcObject = stream;
-      videoRef.current.onloadedmetadata = () => videoRef.current.play().catch(err => {
-        console.error('Error playing video:', err);
-        setError('Failed to play webcam video.');
-        showToast('Failed to play webcam video', 'error');
-        stopWebcam();
-      });
-    } catch (err) {
-      const errorMsg = err.name === 'NotAllowedError'
-        ? 'Webcam access denied. Please grant camera permission.'
-        : err.name === 'NotFoundError'
-        ? 'No webcam found. Please connect a webcam.'
-        : `Failed to access webcam: ${err.message}`;
-      setError(errorMsg);
-      showToast(errorMsg, 'error');
-      setWebcamEnabled(false);
-    }
-  };
-
-  const stopWebcam = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (updateIntervalRef.current) {
-      clearInterval(updateIntervalRef.current);
-      updateIntervalRef.current = null;
-    }
-    if (videoRef.current) videoRef.current.srcObject = null;
-    setWebcamEnabled(false);
-    setDetectedMood('Detecting mood...');
-    setDetectionAttempts(0);
-    setCorrectedMood('');
-    setLastSavedMood(null);
-    showToast('Webcam disabled');
-  };
-
-  const handleMoodCorrection = async (e) => {
-    const newMood = e.target.value;
-    setCorrectedMood(newMood);
-
-    if (!newMood) return;
-
-    try {
-      await saveMood({ mood: newMood, confidence: 1.0 });
-      setLastSavedMood({ mood: newMood, confidence: 1.0 });
-      lastSentRef.current = { timestamp: Date.now(), mood: newMood, confidence: 1.0 };
-      setDetectedMood(`You seem ${newMood} (Confidence: 100%)`);
-      showToast(`Corrected mood ${newMood} saved successfully!`);
-      await fetchRecommendationsAutomatically();
-    } catch (err) {
-      console.error('Error saving corrected mood:', err);
-      setError('Failed to save corrected mood');
-      showToast('Failed to save corrected mood', 'error');
     }
   };
 
@@ -394,19 +148,18 @@ const Dashboard = () => {
       setRecommendations(updatedRecommendations);
       showToast(`Recommendation ${accepted ? 'accepted' : 'declined'} successfully!`);
 
-      // Start timer based on accepted recommendation type
       const latestRec = updatedRecommendations.find(rec => rec.recommendationId === recommendationId);
       if (accepted && latestRec) {
         const details = JSON.parse(latestRec.details || '{}');
         switch (latestRec.type) {
           case 'break':
-            startTimer(parseInt(details.match(/\d+/)[0]) || 5); // Default to 5 minutes if not parsed
+            startTimer(parseInt(details.match(/\d+/)[0]) || 5);
             break;
           case 'activity':
-            if (details.message.includes('body stretch')) startTimer(2); // 2-minute body stretch
-            else if (details.message.includes('walk')) startTimer(10); // 10-minute walk
-            else if (details.message.includes('eye exercises')) startTimer(2); // 2-minute eye exercises
-            else if (details.message.includes('meditation')) startTimer(5); // 5-minute meditation
+            if (details.message.includes('body stretch')) startTimer(2);
+            else if (details.message.includes('walk')) startTimer(10);
+            else if (details.message.includes('eye exercises')) startTimer(2);
+            else if (details.message.includes('meditation')) startTimer(5);
             break;
           default:
             break;
@@ -416,6 +169,11 @@ const Dashboard = () => {
       setError('Failed to update recommendation');
       showToast('Failed to update recommendation', 'error');
     }
+  };
+
+  const handleInstallReminder = () => {
+    alert('Please install the ChillBoard Chrome extension to track your screen time!');
+    window.open('https://chrome.com/webstore', '_blank');
   };
 
   const handleSpotifyConnect = async () => {
@@ -429,71 +187,6 @@ const Dashboard = () => {
     }
   };
 
-  const handleSavePlaylist = async () => {
-    if (!currentPlaylist.id) return;
-    try {
-      await savePlaylist(currentPlaylist.id, { saved: true });
-      showToast('Playlist saved successfully!');
-    } catch (err) {
-      setError('Failed to save playlist');
-      showToast('Failed to save playlist', 'error');
-    }
-  };
-
-  const handlePlay = async () => {
-    if (!deviceId) {
-      setError('No device ID available. Please ensure Spotify is active.');
-      showToast('No device ID available', 'error');
-      return;
-    }
-    setIsPlaying(true);
-    try {
-      await startPlayback(deviceId, currentPlaylist.id, currentPlaylist.offset);
-      const playbackState = localStorage.getItem('chillboardPlaybackState');
-      const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
-      setCurrentPlaylist(prev => ({ ...prev, offset }));
-      showToast('Playback started!');
-    } catch (err) {
-      console.error('Playback error:', err);
-      setError(`Playback failed: ${err.message}`);
-      showToast(`Playback failed: ${err.message}`, 'error');
-      if (err.response?.status === 403) {
-        showToast('Playback restricted. Please ensure you have a Spotify Premium account.', 'error');
-      } else if (err.message.includes('token')) {
-        await handleSpotifyConnect();
-        const userData = await getUser();
-        setSpotifyToken(userData.spotifyToken?.accessToken || '');
-        setDeviceId(userData.deviceId || '');
-      }
-    }
-  };
-
-  const handleSkipPlaylist = async () => {
-    let mood = correctedMood || (lastSavedMood?.mood?.toLowerCase() || (detectedMood && detectedMood.split(' ')[2]?.toLowerCase()));
-    if (!mood) {
-      const moodData = await getLatestMood();
-      mood = moodData?.mood?.toLowerCase() || null;
-    }
-    if (!mood) {
-      setError('No mood detected or available. Enable mood detection or correct the mood.');
-      showToast('No mood detected for new playlist', 'error');
-      return;
-    }
-    try {
-      const newPlaylist = await fetchNewPlaylist(mood, true);
-      setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 });
-      setError('New playlist loaded!');
-      showToast('New playlist loaded!');
-      setIsPlaying(false);
-      localStorage.removeItem('chillboardPlaybackState');
-      await fetchRecommendationsAutomatically();
-    } catch (err) {
-      setError(`Failed to fetch new playlist: ${err.message}`);
-      showToast(`Failed to fetch new playlist: ${err.message}`, 'error');
-      await handleSpotifyConnect();
-    }
-  };
-
   const today = new Date().toISOString().split('T')[0];
 
   const barChartData = {
@@ -501,8 +194,8 @@ const Dashboard = () => {
     datasets: [{
       label: 'Screen Time (minutes)',
       data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
-      backgroundColor: 'rgba(34, 197, 94, 0.6)',
-      borderColor: 'rgba(59, 130, 246, 1)',
+      backgroundColor: 'rgba(71, 85, 105, 0.7)',
+      borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 1,
     }],
   };
@@ -512,112 +205,144 @@ const Dashboard = () => {
     .filter(entry => new Date(entry.date).toISOString().split('T')[0] === today)
     .forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
 
+  // Define varied colors for pie chart that match our UI theme
+  const pieColors = [
+    { bg: 'rgba(71, 85, 105, 0.7)', border: 'rgba(71, 85, 105, 1)' },     // Slate
+    { bg: 'rgba(59, 130, 246, 0.7)', border: 'rgba(59, 130, 246, 1)' },   // Blue
+    { bg: 'rgba(16, 185, 129, 0.7)', border: 'rgba(16, 185, 129, 1)' },   // Emerald
+    { bg: 'rgba(139, 92, 246, 0.7)', border: 'rgba(139, 92, 246, 1)' },   // Violet
+    { bg: 'rgba(245, 158, 11, 0.7)', border: 'rgba(245, 158, 11, 1)' },   // Amber
+    { bg: 'rgba(239, 68, 68, 0.7)', border: 'rgba(239, 68, 68, 1)' },     // Red
+    { bg: 'rgba(236, 72, 153, 0.7)', border: 'rgba(236, 72, 153, 1)' },   // Pink
+    { bg: 'rgba(34, 197, 94, 0.7)', border: 'rgba(34, 197, 94, 1)' },     // Green
+    { bg: 'rgba(168, 85, 247, 0.7)', border: 'rgba(168, 85, 247, 1)' },   // Purple
+    { bg: 'rgba(6, 182, 212, 0.7)', border: 'rgba(6, 182, 212, 1)' },     // Cyan
+    { bg: 'rgba(251, 146, 60, 0.7)', border: 'rgba(251, 146, 60, 1)' },   // Orange
+    { bg: 'rgba(132, 204, 22, 0.7)', border: 'rgba(132, 204, 22, 1)' },   // Lime
+  ];
+
   const pieChartData = {
     labels: Object.keys(tabUsageMap),
     datasets: [{
       label: 'Tab Usage (seconds)',
       data: Object.values(tabUsageMap),
-      backgroundColor: ['rgba(34, 197, 94, 0.6)', 'rgba(59, 130, 246, 0.6)', 'rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)', 'rgba(255, 159, 64, 0.6)'],
-      borderColor: ['rgba(34, 197, 94, 1)', 'rgba(59, 130, 246, 1)', 'rgba(255, 206, 86, 1)', 'rgba(75, 192, 192, 1)', 'rgba(153, 102, 255, 1)', 'rgba(255, 159, 64, 1)'],
+      backgroundColor: Object.keys(tabUsageMap).map((_, index) => pieColors[index % pieColors.length].bg),
+      borderColor: Object.keys(tabUsageMap).map((_, index) => pieColors[index % pieColors.length].border),
       borderWidth: 1,
     }],
   };
 
-  const handleInstallReminder = () => {
-    alert('Please install the ChillBoard Chrome extension to track your screen time!');
-    window.open('https://chrome.com/webstore', '_blank');
-  };
-
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
 
-  useEffect(() => {
-    const handleBeforeUnload = () => {
-      if (isPlaying && currentPlaylist.id) {
-        localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: currentPlaylist.offset, name: currentPlaylist.name }));
-      }
-    };
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [isPlaying, currentPlaylist]);
-
-  useEffect(() => {
-    const initializePlaylist = async () => {
-      const playbackState = localStorage.getItem('chillboardPlaybackState');
-      if (latestRecommendation?.type === 'music') {
-        const details = JSON.parse(latestRecommendation.details);
-        setCurrentPlaylist({ id: details.playlistId, name: details.name, offset: 0 });
-      } else if (playbackState && !currentPlaylist.id) {
-        const { id, offset, name } = JSON.parse(playbackState);
-        setCurrentPlaylist({ id, name, offset });
-      } else {
-        setCurrentPlaylist({ id: '', name: '', offset: 0 });
-      }
-    };
-    initializePlaylist();
-  }, [latestRecommendation]);
-
   return (
-    <div className="min-h-screen bg-green-50 p-4 md:p-6">
-      <h1 className="text-4xl font-bold text-center mb-8 text-gray-700 sm:text-2xl">ChillBoard Dashboard</h1>
-      {error && <p className="text-red-500 text-center mb-4 sm:text-sm">{error}</p>}
+    <div className="min-h-screen bg-slate-50 p-6 space-y-8">
+      {/* Page Header */}
+      <div className="text-center py-8">
+        <h1 className="text-3xl font-medium text-slate-700 mb-2">Dashboard</h1>
+        <p className="text-slate-500">Monitor your digital wellness and get personalized recommendations</p>
+      </div>
+
+      {/* Global Error Display */}
+      {error && (
+        <div className="max-w-4xl mx-auto p-4 bg-red-50 border border-red-200 rounded-lg">
+          <p className="text-red-700 text-center text-sm">{error}</p>
+        </div>
+      )}
+
+      {/* Extension Status */}
       {!extensionInstalled && (
-        <div className="text-center mb-8">
-          <p className="text-yellow-600 mb-2 sm:text-sm">ChillBoard extension not detected!</p>
-          <button onClick={handleInstallReminder} className="bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600 sm:text-sm">Install Extension</button>
+        <div className="max-w-4xl mx-auto bg-amber-50 border border-amber-200 rounded-lg p-6">
+          <div className="text-center">
+            <div className="w-12 h-12 bg-amber-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+              <svg className="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.982 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+            </div>
+            <h3 className="text-lg font-medium text-amber-800 mb-2">Extension Required</h3>
+            <p className="text-amber-700 mb-4 text-sm">ChillBoard extension not detected. Install to track screen time.</p>
+            <button 
+              onClick={handleInstallReminder} 
+              className="px-6 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors duration-200 text-sm font-medium"
+            >
+              Install Extension
+            </button>
+          </div>
         </div>
       )}
-      <div className="mb-8 text-center">
-        <button onClick={webcamEnabled ? stopWebcam : () => setWebcamEnabled(true)} className={`px-4 py-2 rounded ${webcamEnabled ? 'bg-red-500 hover:bg-red-600' : 'bg-green-500 hover:bg-green-600'} text-white`} disabled={!modelsLoaded}>{webcamEnabled ? 'Disable Mood Detection' : 'Enable Mood Detection'}</button>
+
+      {/* Mood Detection Section */}
+      <MoodDetection fetchRecommendations={fetchRecommendationsAutomatically} />
+
+      {/* Quick Connect Section */}
+      <div className="max-w-4xl mx-auto text-center">
+        <button 
+          onClick={handleSpotifyConnect} 
+          className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 shadow-sm font-medium flex items-center justify-center space-x-2 mx-auto"
+        >
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.062 14.615a.625.625 0 01-.862.225c-2.359-1.439-5.328-1.764-8.828-.961a.625.625 0 11-.312-1.211c3.828-.877 7.172-.496 9.777 1.086a.625.625 0 01.225.861zm1.23-2.738a.781.781 0 01-1.078.281c-2.703-1.652-6.824-2.133-10.02-1.168a.781.781 0 11-.468-1.492c3.656-1.105 8.203-.571 11.285 1.34a.781.781 0 01.281 1.039zm.106-2.85C14.692 8.953 9.348 8.734 6.344 9.668a.937.937 0 11-.562-1.789c3.439-1.07 9.398-.813 12.898 1.461a.937.937 0 11-.937 1.625z"/>
+          </svg>
+          <span>Quick Connect Spotify</span>
+        </button>
       </div>
-      <div className="mb-8 text-center">
-        <button onClick={handleSpotifyConnect} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:text-sm">Connect Spotify</button>
-      </div>
-      {leaderboardLoading ? (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
-          <p className="text-gray-700 sm:text-sm">Loading leaderboard...</p>
-        </div>
-      ) : leaderboard.length > 0 ? (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
-          <h2 className="text-xl font-semibold text-gray-700 mb-2 sm:text-lg">Top 3 Leaders</h2>
-          {leaderboard.map((entry, index) => (
-            <p key={index} className="text-gray-700 mb-1 sm:text-sm">
-              #{entry.rank} {entry.username}: {entry.reduction.toFixed(1)} hours
-            </p>
-          ))}
-        </div>
-      ) : (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md max-w-2xl mx-auto border border-blue-200">
-          <p className="text-gray-700 sm:text-sm">No leaderboard data available. Join a challenge to see rankings!</p>
-        </div>
-      )}
-      <div className="mb-8 flex justify-center sm:w-full">
-        <video ref={videoRef} autoPlay muted className={`rounded-lg shadow-md w-64 h-48 ${webcamEnabled ? 'block' : 'hidden'} border border-blue-200 sm:w-full sm:h-32`} playsInline />
-      </div>
-      {webcamEnabled && (
-        <div className="mb-8 text-center bg-white p-4 rounded-lg shadow-md border border-blue-200">
-          <p className="text-xl font-semibold text-gray-700 sm:text-lg">{detectedMood}</p>
-          {!detectedMood.includes('No face') && !detectedMood.includes('Error') && (
-            <div className="mt-4">
-              <label className="text-gray-700 sm:text-sm">Not correct? Select another mood: </label>
-              <select value={correctedMood} onChange={handleMoodCorrection} className="ml-2 p-2 border rounded focus:outline-none focus:ring-2 focus:ring-green-500 sm:text-sm">
-                <option value="">Select mood</option>
-                <option value="happy">Happy</option>
-                <option value="sad">Sad</option>
-                <option value="angry">Angry</option>
-                <option value="stressed">Stressed</option>
-                <option value="calm">Calm</option>
-                <option value="neutral">Neutral</option>
-              </select>
+
+      {/* Leaderboard Section */}
+      <div className="max-w-4xl mx-auto">
+        <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+          <div className="text-center mb-6">
+            <h2 className="text-xl font-medium text-slate-700 mb-2">Challenge Leaderboard</h2>
+            <p className="text-slate-500 text-sm">Top performers in your current challenge</p>
+          </div>
+
+          {leaderboardLoading ? (
+            <div className="text-center py-8">
+              <div className="inline-flex items-center space-x-2">
+                <div className="w-4 h-4 bg-slate-400 rounded-full animate-pulse"></div>
+                <span className="text-slate-600 text-sm">Loading leaderboard...</span>
+              </div>
+            </div>
+          ) : leaderboard.length > 0 ? (
+            <div className="space-y-3">
+              {leaderboard.map((entry, index) => (
+                <div key={index} className="flex items-center justify-between p-4 bg-slate-50 rounded-lg border border-slate-200">
+                  <div className="flex items-center space-x-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium text-white ${
+                      index === 0 ? 'bg-yellow-500' : index === 1 ? 'bg-gray-400' : 'bg-orange-400'
+                    }`}>
+                      {entry.rank}
+                    </div>
+                    <span className="font-medium text-slate-700">{entry.username}</span>
+                  </div>
+                  <div className="text-slate-600 text-sm font-medium">
+                    {entry.reduction.toFixed(1)} hours reduced
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <div className="w-16 h-16 bg-slate-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+                <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+              </div>
+              <p className="text-slate-600 text-sm">No leaderboard data available. Join a challenge to see rankings!</p>
             </div>
           )}
         </div>
-      )}
+      </div>
+
+      {/* Recommendations Section */}
       {latestRecommendation && (
-        <div className="mb-8 sm:w-full">
-          <h2 className="text-2xl font-semibold text-center mb-4 text-gray-700 sm:text-xl">Recommendation</h2>
-          <div className="bg-white p-6 rounded-lg shadow-md max-w-6xl mx-auto border border-blue-200 sm:w-full sm:p-4">
-            {latestRecommendation.details ? (
-              <p className="text-lg font-medium text-gray-700 mb-4 sm:text-base">
+        <div className="max-w-6xl mx-auto">
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            <div className="text-center mb-6">
+              <h2 className="text-xl font-medium text-slate-700 mb-2">Current Recommendation</h2>
+              <p className="text-slate-500 text-sm">Personalized suggestion based on your activity</p>
+            </div>
+
+            <div className="bg-slate-50 rounded-lg p-6 border border-slate-200 mb-6">
+              <p className="text-slate-700 text-center text-lg mb-4">
                 {(() => {
                   try {
                     const details = JSON.parse(latestRecommendation.details);
@@ -628,125 +353,153 @@ const Dashboard = () => {
                   }
                 })()}
               </p>
-            ) : (
-              <p className="text-lg font-medium text-gray-700 mb-4 sm:text-base">No specific recommendation details available.</p>
-            )}
-            <div className="mt-4 flex space-x-4 justify-center sm:flex-col sm:space-y-2 sm:space-x-0">
-              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-500 hover:bg-green-600 text-white'} sm:w-full`}>Accept</button>
-              <button onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)} disabled={actionStatus !== null} className={`px-4 py-2 rounded ${actionStatus ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 text-white'} sm:w-full`}>Decline</button>
-            </div>
-            {actionStatus && <p className="mt-2 text-sm text-gray-700 sm:text-xs">Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!</p>}
-            {latestRecommendation.type === 'break' && !actionStatus && (
-              <div className="mt-4 sm:w-full">
-                {timer !== null ? (
-                  <div>
-                    <p className="text-xl font-semibold text-gray-700 sm:text-lg">{formatTime(timer)}</p>
-                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Reset Timer</button>
+
+              {!actionStatus && (
+                <div className="flex justify-center space-x-4">
+                  <button
+                    onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, true)}
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 shadow-sm font-medium flex items-center space-x-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                    </svg>
+                    <span>Accept</span>
+                  </button>
+                  <button
+                    onClick={() => handleRecommendationAction(latestRecommendation.recommendationId, false)}
+                    className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors duration-200 shadow-sm font-medium flex items-center space-x-2"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                    <span>Decline</span>
+                  </button>
+                </div>
+              )}
+
+              {actionStatus && (
+                <div className="text-center">
+                  <div className={`inline-flex items-center px-4 py-2 rounded-full text-sm font-medium ${
+                    actionStatus === 'accepted' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-800'
+                  }`}>
+                    <div className={`w-2 h-2 rounded-full mr-2 ${
+                      actionStatus === 'accepted' ? 'bg-green-500' : 'bg-slate-500'
+                    }`}></div>
+                    Recommendation {actionStatus === 'accepted' ? 'accepted' : 'declined'}!
                   </div>
-                ) : (
-                  <button onClick={() => startTimer(parseInt(latestRecommendation.details.match(/\d+/)[0]) || 5)} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Start Timer</button>
-                )}
-              </div>
-            )}
-            {(latestRecommendation.type === 'activity' && !actionStatus) && (
-              <div className="mt-4 sm:w-full">
+                </div>
+              )}
+            </div>
+
+            {/* Timer Section */}
+            {(latestRecommendation.type === 'break' || latestRecommendation.type === 'activity') && !actionStatus && (
+              <div className="text-center border-t border-slate-200 pt-6">
                 {timer !== null ? (
-                  <div>
-                    <p className="text-xl font-semibold text-gray-700 sm:text-lg">{formatTime(timer)}</p>
-                    <button onClick={resetTimer} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Reset Timer</button>
+                  <div className="space-y-4">
+                    <div className="text-4xl font-mono text-slate-700 mb-4">{formatTime(timer)}</div>
+                    <button 
+                      onClick={resetTimer} 
+                      className="px-6 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors duration-200 shadow-sm font-medium"
+                    >
+                      Reset Timer
+                    </button>
                   </div>
                 ) : (
                   <button
                     onClick={() => {
-                      const duration = latestRecommendation.details.includes('body stretch') ? 2 :
-                        latestRecommendation.details.includes('walk') ? 10 :
-                        latestRecommendation.details.includes('eye exercises') ? 2 :
-                        latestRecommendation.details.includes('meditation') ? 5 : 0;
+                      let duration = 5;
+                      if (latestRecommendation.type === 'break') {
+                        duration = parseInt(latestRecommendation.details.match(/\d+/)[0]) || 5;
+                      } else if (latestRecommendation.type === 'activity') {
+                        duration = latestRecommendation.details.includes('body stretch') ? 2 :
+                          latestRecommendation.details.includes('walk') ? 10 :
+                          latestRecommendation.details.includes('eye exercises') ? 2 :
+                          latestRecommendation.details.includes('meditation') ? 5 : 0;
+                      }
                       if (duration > 0) startTimer(duration);
                     }}
-                    className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full"
+                    className="px-6 py-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors duration-200 shadow-sm font-medium flex items-center space-x-2 mx-auto"
                   >
-                    Start Timer
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <span>Start Timer</span>
                   </button>
                 )}
               </div>
             )}
+
+            {/* Music Player */}
             {latestRecommendation.type === 'music' && (
-              <div className="mt-4 sm:w-full">
-                {spotifyToken ? (
-                  <div>
-                    <p className="text-md font-medium mb-2 text-gray-700 sm:text-sm">Playing: {currentPlaylist.name || 'Loading...'}</p>
-                    <SpotifyPlayer
-                      token={spotifyToken}
-                      uris={[`spotify:playlist:${currentPlaylist.id}`]}
-                      play={isPlaying}
-                      offset={currentPlaylist.offset}
-                      callback={async (state) => {
-                        if (state.isPlaying) {
-                          setCurrentPlaylist(prev => ({ ...prev, offset: state.progressMs / 1000 || 0 }));
-                          localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: state.progressMs / 1000, name: currentPlaylist.name }));
-                        }
-                        if (state.error) {
-                          console.error('Playback error:', state.error);
-                          setError(`Playback failed: ${state.error.message}`);
-                          showToast(`Playback failed: ${state.error.message}`, 'error');
-                          if (state.error.status === 401) {
-                            await handleSpotifyConnect();
-                            const userData = await getUser();
-                            setSpotifyToken(userData.spotifyToken?.accessToken || '');
-                            setDeviceId(userData.deviceId || '');
-                          } else if (state.error.status === 503) {
-                            setTimeout(async () => {
-                              const userData = await getUser();
-                              setSpotifyToken(userData.spotifyToken?.accessToken || '');
-                              setDeviceId(userData.deviceId || '');
-                              showToast('Retrying playback...', 'info');
-                            }, 5000);
-                          }
-                        }
-                      }}
-                      styles={{
-                        bgColor: '#e5e7eb',
-                        color: '#1a202c',
-                        loaderColor: '#48bb78',
-                        sliderColor: '#48bb78',
-                        trackNameColor: '#2d3748',
-                      }}
-                      className="w-full sm:h-32"
-                    />
-                    <div className="mt-4 flex space-x-4 justify-center sm:flex-col sm:space-y-2 sm:space-x-0">
-                      <button onClick={handleSavePlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Save</button>
-                      <button onClick={handleSkipPlaylist} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Skip</button>
-                      {!isPlaying && <button onClick={handlePlay} className="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:w-full">Play</button>}
-                    </div>
-                  </div>
-                ) : (
-                  <button onClick={handleSpotifyConnect} className="mt-2 bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 sm:text-sm">Connect Spotify to Play</button>
-                )}
+              <div className="border-t border-slate-200 pt-6">
+                <SpotifyPlayerComponent
+                  latestRecommendation={latestRecommendation}
+                  fetchRecommendations={fetchRecommendationsAutomatically}
+                />
               </div>
             )}
           </div>
         </div>
       )}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-8 sm:flex-col sm:gap-4">
-        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Daily Screen Time</h2>
-          {screenTimeData.length > 0 ? (
-            <Bar
-              data={barChartData}
-              options={{
-                responsive: true,
-                plugins: { legend: { display: false }, tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw} minutes` } } },
-                scales: { x: { title: { display: true, text: 'Date' } }, y: { title: { display: true, text: 'Minutes' }, beginAtZero: true } },
-              }}
-            />
-          ) : <p className="text-gray-700 sm:text-sm">No screen time data available.</p>}
+
+      {/* Analytics Section */}
+      <div className="max-w-6xl mx-auto">
+        <div className="text-center mb-8">
+          <h2 className="text-2xl font-medium text-slate-700 mb-2">Analytics Dashboard</h2>
+          <p className="text-slate-500">Monitor your digital wellness progress</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-md border border-blue-200 sm:w-full">
-          <h2 className="text-2xl font-semibold mb-4 text-gray-700 sm:text-xl">Tab Usage</h2>
-          {pieChartData.labels.length > 0 ? <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} /> : <p className="text-gray-700 sm:text-sm">No tab usage data available.</p>}
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Screen Time Chart */}
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-medium text-slate-700 mb-4">Daily Screen Time</h3>
+            {screenTimeData.length > 0 ? (
+              <Bar
+                data={barChartData}
+                options={{
+                  responsive: true,
+                  plugins: { 
+                    legend: { display: false }, 
+                    tooltip: { callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.raw} minutes` } } 
+                  },
+                  scales: { 
+                    x: { title: { display: true, text: 'Date' } }, 
+                    y: { title: { display: true, text: 'Minutes' }, beginAtZero: true } 
+                  },
+                }}
+              />
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-slate-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                <p className="text-slate-600 text-sm">No screen time data available.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Tab Usage Chart */}
+          <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
+            <h3 className="text-lg font-medium text-slate-700 mb-4">Today's Tab Usage</h3>
+            {pieChartData.labels.length > 0 ? (
+              <Pie data={pieChartData} options={{ responsive: true, plugins: { legend: { position: 'top' } } }} />
+            ) : (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-slate-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+                  <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                  </svg>
+                </div>
+                <p className="text-slate-600 text-sm">No tab usage data available.</p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
+
       <ToastContainer />
     </div>
   );
