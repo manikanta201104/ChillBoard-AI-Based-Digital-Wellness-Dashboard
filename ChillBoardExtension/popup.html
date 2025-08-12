@@ -1,28 +1,49 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ChillBoard</title>
-  <link rel="stylesheet" href="popup.css">
+  <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
+  <!-- Login view -->
   <div id="login-container" style="display: none;">
     <h1>ChillBoard Login</h1>
-    <input type="email" id="email" placeholder="Email">
-    <input type="password" id="password" placeholder="Password">
-    <button id="login-btn">Login</button>
-    <p id="login-error" style="color: red;"></p>
+
+    <div class="input-group">
+      <label for="email">Email</label>
+      <input id="email" type="email" placeholder="you@example.com" autocomplete="username" aria-label="Email" />
+    </div>
+
+    <div class="input-group">
+      <label for="password">Password</label>
+      <input id="password" type="password" placeholder="Password" autocomplete="current-password" aria-label="Password" />
+    </div>
+
+    <button id="login-btn" aria-label="Login">Login</button>
+    <p id="login-error" role="alert" aria-live="assertive" style="color: red;"></p>
   </div>
+
+  <!-- Stats view -->
   <div id="stats-container" style="display: none;">
     <h1>ChillBoard</h1>
+
+    <!-- Added tracking status + current tab -->
+    <p>Tracking: <span id="tracking-status" class="status-inactive">Inactive</span></p>
+    <p>Current Tab: <span id="current-tab">—</span></p>
+
     <p>Today's Screen Time: <span id="total-time">0m</span></p>
     <p>Total Tabs Visited: <span id="tab-count">0</span></p>
-    <ul id="tab-usage"></ul>
-    <button id="logout-btn">Logout</button>
-    <button id="open-webapp-btn">Open Web App</button>
-    <p id="loading-message" style="color: blue;"></p>
+
+    <ul id="tab-usage" aria-live="polite" aria-label="Tab usage list"></ul>
+
+    <button id="logout-btn" aria-label="Logout">Logout</button>
+    <button id="open-webapp-btn" aria-label="Open ChillBoard web app">Open Web App</button>
+
+    <p id="loading-message" aria-live="polite" style="color: blue;"></p>
   </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
