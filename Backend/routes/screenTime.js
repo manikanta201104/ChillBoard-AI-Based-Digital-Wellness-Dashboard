@@ -14,12 +14,23 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // Normalize date to YYYY-MM-DD
-    if (typeof date === 'number' || date instanceof Date) {
-      date = new Date(date).toISOString().split('T')[0];
-    } else if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    // Normalize date to Date object at start of day (UTC)
+    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      date = new Date(date + 'T00:00:00Z'); // Convert to Date
+    } else if (typeof date === 'number') {
+      date = new Date(date);
+      date.setUTCHours(0, 0, 0, 0); // Start of day
+    } else if (date instanceof Date) {
+      date.setUTCHours(0, 0, 0, 0); // Ensure start of day
+    } else {
       logger.warn('Invalid date format, normalizing to today', { date });
-      date = new Date().toISOString().split('T')[0];
+      date = new Date();
+      date.setUTCHours(0, 0, 0, 0);
+    }
+
+    if (isNaN(date.getTime())) {
+      logger.warn('Invalid date after normalization', { date });
+      return res.status(400).json({ message: 'Invalid date format' });
     }
 
     if (typeof totalTime !== 'number' || totalTime < 0) {
@@ -39,7 +50,6 @@ router.post('/', authMiddleware, async (req, res) => {
       return true;
     });
 
-    // Ensure screenTimeId is set, generate if not provided
     if (!screenTimeId) {
       screenTimeId = `st_${Date.now()}_${userId}`;
       logger.info('Generated screenTimeId', { screenTimeId });
@@ -47,17 +57,16 @@ router.post('/', authMiddleware, async (req, res) => {
 
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Update existing document
+      // Update existing
       screenTime.totalTime += totalTime;
       const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
       validTabs.forEach((tab) => {
         existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
       });
       screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
-      // Preserve or update screenTimeId if needed
       screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
     } else {
-      // Create new document
+      // Create new
       screenTime = new ScreenTime({
         screenTimeId,
         userId,
@@ -68,11 +77,11 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     await screenTime.save();
-    logger.info('Screen time saved or updated', { userId, date, totalTime: screenTime.totalTime, tabs: screenTime.tabs });
+    logger.info('Screen time saved or updated', { userId, date: screenTime.date.toISOString(), totalTime: screenTime.totalTime, tabs: screenTime.tabs });
     res.status(201).json({ message: 'Screen time saved or updated', screenTime });
   } catch (error) {
-    if (error.code === 11000) { // MongoDB duplicate key error
-      logger.warn('Duplicate key error, attempting to merge', { userId, date });
+    if (error.code === 11000) {
+      // Duplicate, merge
       try {
         const screenTime = await ScreenTime.findOne({ userId, date });
         if (screenTime) {
@@ -83,7 +92,7 @@ router.post('/', authMiddleware, async (req, res) => {
           });
           screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
           await screenTime.save();
-          logger.info('Merged duplicate screen time', { userId, date, totalTime: screenTime.totalTime });
+          logger.info('Merged duplicate screen time', { userId, date: screenTime.date.toISOString(), totalTime: screenTime.totalTime });
           return res.status(201).json({ message: 'Screen time merged', screenTime });
         }
       } catch (mergeError) {
@@ -135,7 +144,7 @@ router.post('/refresh-token', async (req, res) => {
     const newToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '24h' });
     user.spotifyToken.accessToken = newToken;
     user.spotifyToken.obtainedAt = new Date();
-    user.spotifyToken.expiresIn = 86400; // 24 hours in seconds
+    user.spotifyToken.expiresIn = 86400;
     await user.save();
 
     logger.info('Token refreshed successfully', { userId: user.userId });
