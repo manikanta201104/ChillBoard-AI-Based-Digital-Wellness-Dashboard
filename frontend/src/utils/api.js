@@ -22,9 +22,7 @@ export const getScreenTime = async () => {
   if (!token) throw new Error('No token found');
 
   const response = await api.get('/screen-time', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -34,9 +32,7 @@ export const saveMood = async moodData => {
   if (!token) throw new Error('No token found');
 
   const response = await api.post('/mood', moodData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -46,21 +42,15 @@ export const getRecommendations = async () => {
   if (!token) throw new Error('No token found');
 
   const response = await api.get('/recommendations', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   const recommendations = response.data;
   if (!recommendations.length || (Date.now() - new Date(recommendations[0].timestamp).getTime() > 5 * 60 * 1000)) {
     await api.post('/recommendations', {}, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     const updatedResponse = await api.get('/recommendations', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      headers: { Authorization: `Bearer ${token}` },
     });
     return updatedResponse.data;
   }
@@ -71,15 +61,9 @@ export const updateRecommendation = async (recommendationId, accepted) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
 
-  const response = await api.patch(
-    `/recommendations/${recommendationId}`,
-    { accepted },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await api.patch(`/recommendations/${recommendationId}`, { accepted }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   return response.data;
 };
 
@@ -88,9 +72,7 @@ export const initiateSpotifyLogin = async () => {
   if (!token) throw new Error('No token found');
 
   const response = await api.get('/spotify/login', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data.authorizeURL;
 };
@@ -100,9 +82,7 @@ export const getUser = async () => {
   if (!token) throw new Error('No token found');
 
   const response = await api.get('/auth/profile', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -111,9 +91,7 @@ export const savePlaylist = async (playlistId, data) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.patch(`/spotify/playlist/${playlistId}`, data, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -122,9 +100,7 @@ export const fetchNewPlaylist = async (mood, skip = false) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.get(`spotify/playlist?mood=${mood}${skip ? '&skip=true' : ''}`, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -132,15 +108,9 @@ export const fetchNewPlaylist = async (mood, skip = false) => {
 export const startPlayback = async (deviceId, playlistId, offset = 0) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.post(
-    '/spotify/play',
-    { device_id: deviceId, playlist_id: playlistId, offset },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await api.post('/spotify/play', { device_id: deviceId, playlist_id: playlistId, offset }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   return response.data;
 };
 
@@ -157,9 +127,7 @@ export const getChallenges = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.get('/challenges', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -167,15 +135,9 @@ export const getChallenges = async () => {
 export const joinChallenge = async challengeId => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.post(
-    '/challenges/join',
-    { challengeId },
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    }
-  );
+  const response = await api.post('/challenges/join', { challengeId }, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
   return response.data;
 };
 
@@ -184,9 +146,7 @@ export const getLeaderboard = async challengeId => {
   if (!token) throw new Error('No token found');
   const response = await api.get('/challenges/leaderboard', {
     params: { challengeId },
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -195,9 +155,7 @@ export const unlinkSpotify = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.delete('/spotify/unlink', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -206,9 +164,7 @@ export const getUserPlaylists = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.get('/auth/playlists', {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -217,9 +173,7 @@ export const saveSettings = async (settingsData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.post('/auth/settings', settingsData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };
@@ -228,9 +182,26 @@ export const sendContactMessage = async (contactData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const response = await api.post('/contact', contactData, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+};
+
+// New endpoints for trends
+export const getScreenTimeTrends = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.get('/screen-time/trends', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+};
+
+export const getMoodTrends = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.get('/mood/trends', {
+    headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
 };

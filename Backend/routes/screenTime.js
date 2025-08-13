@@ -2,9 +2,6 @@ import express from 'express';
 import ScreenTime from '../models/screenTime.js';
 import { authMiddleware } from '../middleware/auth.js';
 import { logger } from '../index.js';
-import User from '../models/user.js';
-import jwt from 'jsonwebtoken';
-import { config } from '../config/env.js';
 
 const router = express.Router();
 
@@ -14,14 +11,13 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    // Normalize date to Date object at start of day (UTC)
     if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      date = new Date(date + 'T00:00:00Z'); // Convert to Date
+      date = new Date(date + 'T00:00:00Z');
     } else if (typeof date === 'number') {
       date = new Date(date);
-      date.setUTCHours(0, 0, 0, 0); // Start of day
+      date.setUTCHours(0, 0, 0, 0);
     } else if (date instanceof Date) {
-      date.setUTCHours(0, 0, 0, 0); // Ensure start of day
+      date.setUTCHours(0, 0, 0, 0);
     } else {
       logger.warn('Invalid date format, normalizing to today', { date });
       date = new Date();
@@ -57,7 +53,6 @@ router.post('/', authMiddleware, async (req, res) => {
 
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Update existing
       screenTime.totalTime += totalTime;
       const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
       validTabs.forEach((tab) => {
@@ -66,7 +61,6 @@ router.post('/', authMiddleware, async (req, res) => {
       screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
       screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
     } else {
-      // Create new
       screenTime = new ScreenTime({
         screenTimeId,
         userId,
@@ -81,7 +75,6 @@ router.post('/', authMiddleware, async (req, res) => {
     res.status(201).json({ message: 'Screen time saved or updated', screenTime });
   } catch (error) {
     if (error.code === 11000) {
-      // Duplicate, merge
       try {
         const screenTime = await ScreenTime.findOne({ userId, date });
         if (screenTime) {
@@ -114,6 +107,36 @@ router.get('/', authMiddleware, async (req, res) => {
     res.status(200).json(screenTimeData);
   } catch (error) {
     logger.error('Error fetching screen time:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// GET /screen-time/trends - Fetch weekly screen time trends
+router.get('/trends', authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
+    oneWeekAgo.setUTCHours(0, 0, 0, 0);
+
+    const trends = await ScreenTime.aggregate([
+      { $match: { userId, date: { $gte: oneWeekAgo } } },
+      {
+        $group: {
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+          totalTime: { $sum: '$totalTime' },
+        },
+      },
+      { $sort: { _id: 1 } },
+    ]).exec();
+
+    const labels = trends.map(t => `Week ${new Date(t._id).getUTCDate()}`);
+    const data = trends.map(t => t.totalTime / 3600); // Convert to hours
+
+    res.status(200).json({ labels, data });
+  } catch (error) {
+    logger.error('Error fetching screen time trends:', error);
     res.status(500).json({ message: 'Server error' });
   }
 });

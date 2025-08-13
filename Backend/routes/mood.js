@@ -18,13 +18,11 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid confidence value' });
     }
 
-    // Fetch the latest mood to calculate timeSinceLast
     const latestMood = await Mood.findOne({ userId }).sort({ timestamp: -1 });
     const timeSinceLast = latestMood ? (Date.now() - latestMood.timestamp.getTime()) / 1000 : 30;
     const confidenceDrop = latestMood ? Math.abs(confidence - latestMood.confidence) : 0;
 
     if (confidenceDrop > 0.2 || (timeSinceLast >= 30 && (!latestMood || mood !== latestMood.mood))) {
-      // Use upsert to update or insert based on userId
       const updatedMood = await Mood.findOneAndUpdate(
         { userId },
         { mood, confidence, timestamp: new Date() },
@@ -33,11 +31,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
       logger.info('Mood updated', { userId, mood, confidence, timestamp: updatedMood.timestamp });
 
-      // Simulate TriggerLink for recommendations
-      const triggerLink = {
-        fromSource: 'mood',
-        data: { mood, confidence, timestamp: new Date().toISOString() },
-      };
+      const triggerLink = { fromSource: 'mood', data: { mood, confidence, timestamp: new Date().toISOString() } };
       logger.info('TriggerLink generated', triggerLink);
 
       res.status(200).json({ message: 'Mood updated', mood: updatedMood });
@@ -67,6 +61,35 @@ router.get('/latest', authMiddleware, async (req, res) => {
   } catch (error) {
     logger.error('Error fetching latest mood:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// GET /mood/trends - Fetch weekly mood trends
+router.get('/trends', authMiddleware, async (req, res) => {
+  const userId = req.user.userId;
+
+  try {
+    const oneWeekAgo = new Date();
+    oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
+    oneWeekAgo.setUTCHours(0, 0, 0, 0);
+
+    const trends = await Mood.aggregate([
+      { $match: { userId, timestamp: { $gte: oneWeekAgo } } },
+      {
+        $group: {
+          _id: '$mood',
+          count: { $sum: 1 },
+        },
+      },
+    ]).exec();
+
+    const labels = ['Happy', 'Sad', 'Angry', 'Stressed', 'Calm', 'Neutral'];
+    const data = labels.map(mood => trends.find(t => t._id === mood)?.count || 0);
+
+    res.status(200).json({ labels, data });
+  } catch (error) {
+    logger.error('Error fetching mood trends:', error);
+    res.status(500).json({ message: 'Server error' });
   }
 });
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bar, Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js';
-import { initiateSpotifyLogin, getUser, getUserPlaylists, unlinkSpotify } from '../utils/api';
+import { getUser, getUserPlaylists, unlinkSpotify, initiateSpotifyLogin, getScreenTime, getLatestMood } from '../utils/api';
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
 
@@ -11,31 +11,40 @@ const Profile = () => {
   const [spotifyToken, setSpotifyToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [screenTimeData, setScreenTimeData] = useState([]);
+  const [latestMood, setLatestMood] = useState(null);
 
   useEffect(() => {
-    const fetchUserData = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
         const token = localStorage.getItem('jwt');
-        if (token) {
-          const userResponse = await getUser();
-          setUserData(userResponse);
+        if (!token) throw new Error('No token found');
 
-          const playlistResponse = await getUserPlaylists();
-          setPlaylists(playlistResponse);
+        const userResponse = await getUser();
+        setUserData(userResponse);
 
-          const user = await getUser();
-          setSpotifyToken(user.spotifyToken?.accessToken || '');
-        }
+        const playlistResponse = await getUserPlaylists();
+        setPlaylists(playlistResponse);
+
+        const user = await getUser();
+        setSpotifyToken(user.spotifyToken?.accessToken || '');
+
+        const screenTimeResponse = await getScreenTime();
+        setScreenTimeData(screenTimeResponse);
+
+        const moodResponse = await getLatestMood();
+        setLatestMood(moodResponse);
       } catch (err) {
-        setError('Failed to fetch data');
-        console.error(err);
+        setError('Failed to fetch data: ' + err.message);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchUserData();
+    fetchData();
+    const pollInterval = setInterval(fetchData, 5 * 60 * 1000); // Poll every 5 minutes
+    return () => clearInterval(pollInterval);
   }, []);
 
   const handleLinkSpotify = async () => {
@@ -43,7 +52,7 @@ const Profile = () => {
       const authorizeURL = await initiateSpotifyLogin();
       window.location.href = authorizeURL;
     } catch (err) {
-      setError('Failed to initiate Spotify Login');
+      setError('Failed to initiate Spotify Login: ' + err.message);
     }
   };
 
@@ -54,15 +63,16 @@ const Profile = () => {
       setPlaylists([]);
       setError('Spotify account unlinked successfully');
     } catch (err) {
-      setError('Failed to unlink Spotify account');
+      setError('Failed to unlink Spotify account: ' + err.message);
     }
   };
 
+  // Prepare screen time trend data
   const screenTimeTrend = {
-    labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+    labels: screenTimeData.map(d => `Week ${new Date(d.date).getUTCDate()}`) || ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
     datasets: [{
       label: 'Average Screen Time (hours)',
-      data: [6, 5.5, 5, 4.5],
+      data: screenTimeData.map(d => d.totalTime / 3600) || [6, 5.5, 5, 4.5],
       backgroundColor: 'rgba(71, 85, 105, 0.6)',
       borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 2,
@@ -70,11 +80,12 @@ const Profile = () => {
     }],
   };
 
+  // Prepare mood trend data
   const moodTrend = {
-    labels: ['Happy', 'Sad', 'Neutral', 'Stressed'],
+    labels: ['Happy', 'Sad', 'Angry', 'Stressed', 'Calm', 'Neutral'],
     datasets: [{
       label: 'Mood Frequency',
-      data: [30, 20, 40, 10],
+      data: [0, 0, 0, 0, 0, 0].map((_, i) => latestMood?.mood === moodTrend.labels[i] ? 1 : 0) || [30, 20, 40, 10],
       backgroundColor: 'rgba(71, 85, 105, 0.6)',
       borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 2,
@@ -84,42 +95,21 @@ const Profile = () => {
 
   const chartOptions = {
     responsive: true,
-    plugins: { 
-      legend: { position: 'top' }, 
-      title: { display: false }
-    },
+    plugins: { legend: { position: 'top' }, title: { display: false } },
     scales: {
-      y: {
-        grid: {
-          color: 'rgba(148, 163, 184, 0.1)',
-        },
-        ticks: {
-          color: '#64748b',
-        }
-      },
-      x: {
-        grid: {
-          color: 'rgba(148, 163, 184, 0.1)',
-        },
-        ticks: {
-          color: '#64748b',
-        }
-      }
-    }
+      y: { grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#64748b' } },
+      x: { grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#64748b' } },
+    },
   };
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header Section */}
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold text-slate-700 mb-4">Your Profile</h1>
-          <p className="text-slate-500 max-w-2xl mx-auto">
-            Track your digital wellness journey and manage your preferences
-          </p>
+          <p className="text-slate-500 max-w-2xl mx-auto">Track your digital wellness journey and manage your preferences</p>
         </div>
 
-        {/* Loading State */}
         {loading && (
           <div className="text-center py-12">
             <div className="inline-flex items-center space-x-2">
@@ -129,14 +119,9 @@ const Profile = () => {
           </div>
         )}
 
-        {/* Error Display */}
         {error && (
           <div className="mb-8 max-w-2xl mx-auto">
-            <div className={`p-4 rounded-lg border ${
-              error.includes('successfully') 
-                ? 'bg-green-50 border-green-200 text-green-700' 
-                : 'bg-red-50 border-red-200 text-red-700'
-            }`}>
+            <div className={`p-4 rounded-lg border ${error.includes('successfully') ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>
               <div className="flex items-center space-x-2">
                 <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   {error.includes('successfully') ? (
@@ -153,8 +138,6 @@ const Profile = () => {
 
         {!loading && (
           <div className="space-y-8">
-            
-            {/* User Details Card */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200">
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center space-x-3">
@@ -171,9 +154,7 @@ const Profile = () => {
                   <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
                     <div className="flex items-center space-x-3">
                       <div className="w-10 h-10 bg-slate-600 rounded-full flex items-center justify-center">
-                        <span className="text-white font-semibold text-lg">
-                          {userData.username ? userData.username.charAt(0).toUpperCase() : 'U'}
-                        </span>
+                        <span className="text-white font-semibold text-lg">{userData.username ? userData.username.charAt(0).toUpperCase() : 'U'}</span>
                       </div>
                       <div>
                         <p className="text-sm text-slate-500 font-medium">Username</p>
@@ -198,9 +179,7 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Analytics Cards */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Screen Time Trends */}
               <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                 <div className="p-6 border-b border-slate-200">
                   <div className="flex items-center space-x-3">
@@ -211,7 +190,7 @@ const Profile = () => {
                     </div>
                     <div>
                       <h3 className="text-xl font-semibold text-slate-700">Screen Time Trends</h3>
-                      <p className="text-slate-500 text-sm">Weekly screen time averages (placeholder data)</p>
+                      <p className="text-slate-500 text-sm">Weekly screen time averages</p>
                     </div>
                   </div>
                 </div>
@@ -220,7 +199,6 @@ const Profile = () => {
                 </div>
               </div>
 
-              {/* Mood Trends */}
               <div className="bg-white rounded-lg shadow-sm border border-slate-200">
                 <div className="p-6 border-b border-slate-200">
                   <div className="flex items-center space-x-3">
@@ -231,7 +209,7 @@ const Profile = () => {
                     </div>
                     <div>
                       <h3 className="text-xl font-semibold text-slate-700">Mood Trends</h3>
-                      <p className="text-slate-500 text-sm">Mood frequency analysis (placeholder data)</p>
+                      <p className="text-slate-500 text-sm">Current mood analysis</p>
                     </div>
                   </div>
                 </div>
@@ -241,7 +219,6 @@ const Profile = () => {
               </div>
             </div>
 
-            {/* Spotify Integration Card */}
             <div className="bg-white rounded-lg shadow-sm border border-slate-200">
               <div className="p-6 border-b border-slate-200">
                 <div className="flex items-center justify-between">
@@ -260,15 +237,12 @@ const Profile = () => {
                   </div>
                   <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1 rounded-full">
                     <div className={`w-2 h-2 rounded-full ${spotifyToken ? 'bg-green-500' : 'bg-slate-400'}`}></div>
-                    <span className="text-xs text-slate-600 font-medium">
-                      {spotifyToken ? 'Connected' : 'Not Connected'}
-                    </span>
+                    <span className="text-xs text-slate-600 font-medium">{spotifyToken ? 'Connected' : 'Not Connected'}</span>
                   </div>
                 </div>
               </div>
               
               <div className="p-6">
-                {/* Playlists Section */}
                 <div className="mb-6">
                   <h3 className="text-lg font-medium text-slate-700 mb-4">Your Playlists</h3>
                   {playlists.length > 0 ? (
@@ -320,7 +294,6 @@ const Profile = () => {
                   )}
                 </div>
 
-                {/* Action Button */}
                 <div className="pt-4 border-t border-slate-200">
                   {spotifyToken ? (
                     <button
@@ -346,7 +319,6 @@ const Profile = () => {
                 </div>
               </div>
             </div>
-
           </div>
         )}
       </div>
