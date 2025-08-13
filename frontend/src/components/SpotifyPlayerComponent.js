@@ -41,8 +41,8 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       setSpotifyToken(userData.spotifyToken?.accessToken || '');
       setDeviceId(userData.deviceId || '');
     } catch (err) {
-      setError('Failed to fetch user data');
-      showToast('Failed to fetch user data', 'error');
+      setError(`Failed to fetch user data: ${err.message}`);
+      showToast(`Failed to fetch user data: ${err.message}`, 'error');
     } finally {
       setRefreshingToken(false);
     }
@@ -121,8 +121,8 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       console.error('Playback error:', err);
       setError(`Playback failed: ${err.message}`);
       showToast(`Playback failed: ${err.message}`, 'error');
-      if (err.response?.status === 403) {
-        showToast('Playback restricted. Please ensure you have a Spotify Premium account.', 'error');
+      if (err.response?.status === 401 || err.response?.status === 403) {
+        await handleSpotifyConnect();
       } else if (err.message.includes('token')) {
         await refreshUserData();
       }
@@ -147,9 +147,18 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
     } catch (err) {
       setError(`Failed to fetch new playlist: ${err.message}`);
       showToast(`Failed to fetch new playlist: ${err.message}`, 'error');
-      await handleSpotifyConnect();
+      if (err.response?.status === 401) {
+        await handleSpotifyConnect();
+      }
     }
   };
+
+  // Handle re-authentication redirect from backend
+  useEffect(() => {
+    if (error && error.includes('re-authenticate')) {
+      handleSpotifyConnect();
+    }
+  }, [error]);
 
   return (
     <div className="max-w-4xl mx-auto p-6 bg-slate-50 rounded-lg shadow-sm">

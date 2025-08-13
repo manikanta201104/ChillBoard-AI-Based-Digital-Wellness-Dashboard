@@ -75,6 +75,15 @@ const refreshAccessToken = async (userId, refreshToken) => {
       stack: err.stack,
       statusCode: err.statusCode,
     });
+    if (err.body && err.body.error === 'invalid_grant') {
+      // Clear invalid token and force re-authentication
+      await User.findOneAndUpdate(
+        { userId },
+        { $unset: { spotifyToken: 1 } },
+        { new: true }
+      );
+      throw new Error('Refresh token invalid, please re-authenticate with Spotify');
+    }
     throw new Error(`Failed to refresh access token: ${errorDetail}`);
   }
 };
@@ -140,7 +149,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
   try {
     const user = await User.findOne({ userId });
     if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) {
-      return res.status(400).json({ message: 'Spotify token not found' });
+      return res.status(401).json({ message: 'Spotify token not found, please re-authenticate' });
     }
 
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
@@ -150,12 +159,18 @@ router.get('/playlist', authMiddleware, async (req, res) => {
     let currentAccessToken = accessToken;
     if (now >= tokenExpiry - 300000) { // Refresh if token expires within 5 minutes
       logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
-      currentAccessToken = await refreshAccessToken(userId, refreshToken);
-      if (!currentAccessToken) {
-        return res.status(500).json({ message: 'Failed to refresh access token' });
+      try {
+        currentAccessToken = await refreshAccessToken(userId, refreshToken);
+        if (!currentAccessToken) {
+          throw new Error('Failed to refresh access token');
+        }
+        spotifyApi.setAccessToken(currentAccessToken);
+      } catch (refreshErr) {
+        if (refreshErr.message.includes('re-authenticate')) {
+          return res.status(401).json({ message: 'Invalid refresh token, please re-authenticate with Spotify', redirect: '/spotify/login' });
+        }
+        throw refreshErr;
       }
-      // Update spotifyApi with new token
-      spotifyApi.setAccessToken(currentAccessToken);
     } else {
       logger.info('Token still valid', { userId, tokenExpiry });
       spotifyApi.setAccessToken(currentAccessToken);
@@ -221,7 +236,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       if (!existingPlaylist) {
         const newPlaylist = new Playlist({
           userId,
-          spotifyPlaylistId: playlist.id,
+          spotifyTokenId: playlist.id,
           name: playlist.name,
           mood: category,
           saved: false,
@@ -240,6 +255,9 @@ router.get('/playlist', authMiddleware, async (req, res) => {
     }
   } catch (err) {
     logger.error('Error fetching playlist', { error: err.message, stack: err.stack, statusCode: err.statusCode });
+    if (err.message.includes('re-authenticate')) {
+      return res.status(401).json({ message: 'Invalid refresh token, please re-authenticate with Spotify', redirect: '/spotify/login' });
+    }
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
@@ -257,16 +275,23 @@ router.post('/play', authMiddleware, async (req, res) => {
 
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
     const now = Date.now();
-    const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
+    const tokenExpiry = new Date(obtainedAt).getTime() + expires_in * 1000;
 
     let currentAccessToken = accessToken;
     if (now >= tokenExpiry - 300000) {
       logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
-      currentAccessToken = await refreshAccessToken(userId, refreshToken);
-      if (!currentAccessToken) {
-        return res.status(500).json({ message: 'Failed to refresh access token' });
+      try {
+        currentAccessToken = await refreshAccessToken(userId, refreshToken);
+        if (!currentAccessToken) {
+          throw new Error('Failed to refresh access token');
+        }
+        spotifyApi.setAccessToken(currentAccessToken);
+      } catch (refreshErr) {
+        if (refreshErr.message.includes('re-authenticate')) {
+          return res.status(401).json({ message: 'Invalid refresh token, please re-authenticate with Spotify', redirect: '/spotify/login' });
+        }
+        throw refreshErr;
       }
-      spotifyApi.setAccessToken(currentAccessToken);
     } else {
       logger.info('Token still valid', { userId, tokenExpiry });
       spotifyApi.setAccessToken(currentAccessToken);
