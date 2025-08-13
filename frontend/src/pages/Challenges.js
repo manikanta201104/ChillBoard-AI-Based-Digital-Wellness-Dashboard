@@ -4,8 +4,8 @@ import { getChallenges, joinChallenge, getLeaderboard } from '../utils/api';
 const Challenges = () => {
   const [challenges, setChallenges] = useState([]);
   const [joinedChallenges, setJoinedChallenges] = useState(new Set());
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [selectedChallengeId, setSelectedChallengeId] = useState(null);
+  const [leaderboards, setLeaderboards] = useState({});
+  const [selectedDuration, setSelectedDuration] = useState(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
@@ -16,7 +16,7 @@ const Challenges = () => {
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const data = await getLeaderboard(challengeId);
-        setLeaderboard(data);
+        setLeaderboards(prev => ({ ...prev, [challengeId]: data }));
         if (error) setError('');
         setLoading(false);
         return;
@@ -40,15 +40,13 @@ const Challenges = () => {
       const joinedSet = new Set(joined);
       setJoinedChallenges(joinedSet);
 
-      const storedChallengeId = localStorage.getItem('selectedChallengeId');
-      const latestJoined = storedChallengeId && joinedSet.has(storedChallengeId)
-        ? storedChallengeId
-        : joined.length > 0
-        ? joined[0]
-        : null;
-      setSelectedChallengeId(latestJoined);
-      if (latestJoined) {
-        await fetchLeaderboard(latestJoined);
+      const durations = [...new Set(data.map(ch => ch.duration))].sort((a, b) => a - b);
+      const initialDuration = durations.find(d => joinedSet.has(data.find(c => c.duration === d)?.challengeId)) || (durations.length > 0 ? durations[0] : null);
+      setSelectedDuration(initialDuration);
+
+      if (initialDuration) {
+        const challengeId = data.find(c => c.duration === initialDuration && joinedSet.has(c.challengeId))?.challengeId || data.find(c => c.duration === initialDuration)?.challengeId;
+        if (challengeId) await fetchLeaderboard(challengeId);
       }
     } catch (err) {
       setError(err.message || 'Failed to fetch challenges. Please ensure screen time data is being recorded.');
@@ -58,32 +56,28 @@ const Challenges = () => {
     }
   };
 
-  // Poll challenges every 5 minutes
   useEffect(() => {
     if (!userId) return;
 
-    fetchChallenges(); // Initial fetch
-    const pollChallenges = setInterval(fetchChallenges, 5 * 60 * 1000); // 5 minutes
+    fetchChallenges();
+    const pollChallenges = setInterval(fetchChallenges, 5 * 60 * 1000);
 
     return () => clearInterval(pollChallenges);
   }, [userId]);
 
-  // Poll leaderboard every 5 minutes when a challenge is selected
   useEffect(() => {
-    if (!selectedChallengeId || !userId) {
-      setLeaderboard([]);
-      localStorage.removeItem('selectedChallengeId');
+    if (!selectedDuration || !userId) {
+      setLeaderboards({});
       return;
     }
 
-    fetchLeaderboard(selectedChallengeId); // Initial fetch
-    const pollLeaderboard = setInterval(() => {
-      fetchLeaderboard(selectedChallengeId);
-    }, 5 * 60 * 1000); // 5 minutes
-
-    localStorage.setItem('selectedChallengeId', selectedChallengeId);
-    return () => clearInterval(pollLeaderboard);
-  }, [selectedChallengeId, userId]);
+    const challengeId = challenges.find(c => c.duration === selectedDuration && joinedChallenges.has(c.challengeId))?.challengeId || challenges.find(c => c.duration === selectedDuration)?.challengeId;
+    if (challengeId) {
+      fetchLeaderboard(challengeId);
+      const pollLeaderboard = setInterval(() => fetchLeaderboard(challengeId), 5 * 60 * 1000);
+      return () => clearInterval(pollLeaderboard);
+    }
+  }, [selectedDuration, userId, challenges, joinedChallenges]);
 
   const handleJoinChallenge = async (challengeId) => {
     setLoading(true);
@@ -91,11 +85,12 @@ const Challenges = () => {
       const response = await joinChallenge(challengeId);
       const updatedJoined = new Set(joinedChallenges).add(challengeId);
       setJoinedChallenges(updatedJoined);
-      setSelectedChallengeId(challengeId);
+      const challenge = challenges.find(c => c.challengeId === challengeId);
+      setSelectedDuration(challenge.duration);
       await fetchLeaderboard(challengeId);
       setError('Successfully joined challenge! Progress updates daily at midnight.');
       localStorage.setItem('joinedChallenges', JSON.stringify(Array.from(updatedJoined)));
-      await fetchChallenges(); // Refresh challenges to show initial reduction
+      await fetchChallenges();
     } catch (err) {
       setError(err.message || 'Failed to join challenge');
     } finally {
@@ -136,10 +131,18 @@ const Challenges = () => {
     }
   }, []);
 
+  const getDurationLabel = (days) => {
+    const labels = {
+      7: '7 Days Challenge',
+      200: '200 Days Challenge',
+      365: '365 Days Challenge'
+    };
+    return labels[days] || `${days} Days Challenge`;
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-6xl mx-auto">
-        {/* Header Section */}
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold text-slate-700 mb-4">Digital Detox Challenges</h1>
           <p className="text-slate-500 max-w-2xl mx-auto">
@@ -147,7 +150,6 @@ const Challenges = () => {
           </p>
         </div>
 
-        {/* Loading State */}
         {(loading && initialLoad) && (
           <div className="text-center py-12">
             <div className="inline-flex items-center space-x-2">
@@ -157,7 +159,6 @@ const Challenges = () => {
           </div>
         )}
 
-        {/* Error Display */}
         {error && (
           <div className="mb-8 max-w-2xl mx-auto">
             <div className={`p-4 rounded-lg border ${
@@ -179,7 +180,6 @@ const Challenges = () => {
           </div>
         )}
 
-        {/* Challenges Grid */}
         {challenges.length === 0 && !loading ? (
           <div className="text-center py-16">
             <div className="w-16 h-16 bg-slate-200 rounded-full mx-auto mb-4 flex items-center justify-center">
@@ -204,7 +204,6 @@ const Challenges = () => {
                   }`}
                 >
                   <div className="p-6">
-                    {/* Challenge Header */}
                     <div className="flex items-start justify-between mb-4">
                       <h2 className="text-xl font-semibold text-slate-700">
                         {challenge.title}
@@ -219,12 +218,10 @@ const Challenges = () => {
                       )}
                     </div>
 
-                    {/* Challenge Description */}
                     <p className="text-slate-600 mb-6 text-sm leading-relaxed">
                       {challenge.description || 'Take on this digital detox challenge to improve your screen time habits'}
                     </p>
 
-                    {/* Action Section */}
                     {isJoined ? (
                       <div className="space-y-3">
                         <div className="bg-white rounded-lg p-4 border border-green-200">
@@ -267,13 +264,34 @@ const Challenges = () => {
           </div>
         )}
 
-        {/* Leaderboard Section */}
-        {selectedChallengeId && (
-          <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+        {/* Challenge Duration Buttons */}
+        {challenges.length > 0 && (
+          <div className="mb-6">
+            <div className="flex flex-wrap gap-2">
+              {[...new Set(challenges.map(c => c.duration))].sort((a, b) => a - b).map(duration => (
+                <button
+                  key={duration}
+                  onClick={() => setSelectedDuration(duration)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    selectedDuration === duration
+                      ? 'bg-green-600 text-white'
+                      : 'bg-slate-200 text-slate-700 hover:bg-slate-300'
+                  }`}
+                >
+                  {getDurationLabel(duration)}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Leaderboard Sections */}
+        {selectedDuration && challenges.filter(c => c.duration === selectedDuration).map(challenge => (
+          <div key={challenge.challengeId} className="bg-white rounded-lg shadow-sm border border-slate-200 mb-6">
             <div className="p-6 border-b border-slate-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-700">Challenge Leaderboard</h2>
+                  <h2 className="text-2xl font-bold text-slate-700">{getDurationLabel(challenge.duration)} Leaderboard</h2>
                   <p className="text-slate-500 text-sm mt-1">Top performers in screen time reduction</p>
                 </div>
                 <div className="flex items-center space-x-2 bg-slate-100 px-3 py-1 rounded-full">
@@ -284,16 +302,16 @@ const Challenges = () => {
             </div>
 
             <div className="p-6">
-              {loading && !leaderboard.length ? (
+              {loading && !leaderboards[challenge.challengeId]?.length ? (
                 <div className="text-center py-8">
                   <div className="inline-flex items-center space-x-2">
                     <div className="w-4 h-4 bg-slate-400 rounded-full animate-pulse"></div>
                     <span className="text-slate-600">Loading leaderboard...</span>
                   </div>
                 </div>
-              ) : leaderboard.length > 0 ? (
+              ) : leaderboards[challenge.challengeId]?.length > 0 ? (
                 <div className="space-y-3">
-                  {leaderboard.map((entry, index) => {
+                  {leaderboards[challenge.challengeId].map((entry, index) => {
                     const isTopThree = index < 3;
                     const medals = ['🥇', '🥈', '🥉'];
                     
@@ -340,7 +358,7 @@ const Challenges = () => {
               )}
             </div>
           </div>
-        )}
+        ))}
       </div>
     </div>
   );
