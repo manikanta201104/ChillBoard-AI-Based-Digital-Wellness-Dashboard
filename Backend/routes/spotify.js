@@ -199,15 +199,19 @@ router.get('/playlist', authMiddleware, async (req, res) => {
         }
       }
 
-      if (!playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
+      if (!playlists || !playlists.body || !playlists.body.playlists || !playlists.body.playlists.items || playlists.body.playlists.items.length === 0) {
         return res.status(404).json({ message: 'No playlists found for this mood' });
       }
 
-      const availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+      const availablePlaylists = playlists.body.playlists.items.filter(p => p && p.id && (!cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId));
       if (availablePlaylists.length === 0 && !skip) {
         logger.warn('No new playlists available, forcing new search');
         playlists = await spotifyApi.searchPlaylists(`category:${category} calm`, { limit: 10 });
-        availablePlaylists = playlists.body.playlists.items.filter(p => !cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId);
+        availablePlaylists = playlists.body.playlists.items.filter(p => p && p.id && (!cachedPlaylist || p.id !== cachedPlaylist?.spotifyPlaylistId));
+      }
+
+      if (availablePlaylists.length === 0) {
+        return res.status(404).json({ message: 'No valid playlists available' });
       }
 
       const playlist = availablePlaylists[Math.floor(Math.random() * availablePlaylists.length)];

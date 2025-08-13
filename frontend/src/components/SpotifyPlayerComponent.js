@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import SpotifyPlayer from 'react-spotify-web-playback';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
@@ -17,6 +17,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
   const [isPlaying, setIsPlaying] = useState(false);
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
+  const [refreshingToken, setRefreshingToken] = useState(false);
 
   const showToast = (message, type = 'success') => {
     const options = {
@@ -31,6 +32,21 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
     else if (type === 'error') toast.error(message, options);
     else toast.info(message, options);
   };
+
+  const refreshUserData = useCallback(async () => {
+    if (refreshingToken) return;
+    setRefreshingToken(true);
+    try {
+      const userData = await getUser();
+      setSpotifyToken(userData.spotifyToken?.accessToken || '');
+      setDeviceId(userData.deviceId || '');
+    } catch (err) {
+      setError('Failed to fetch user data');
+      showToast('Failed to fetch user data', 'error');
+    } finally {
+      setRefreshingToken(false);
+    }
+  }, [refreshingToken]);
 
   useEffect(() => {
     const initialize = async () => {
@@ -64,7 +80,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [latestRecommendation, isPlaying, currentPlaylist]);
+  }, [latestRecommendation, isPlaying, currentPlaylist.id]);
 
   const handleSpotifyConnect = async () => {
     try {
@@ -108,10 +124,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       if (err.response?.status === 403) {
         showToast('Playback restricted. Please ensure you have a Spotify Premium account.', 'error');
       } else if (err.message.includes('token')) {
-        await handleSpotifyConnect();
-        const userData = await getUser();
-        setSpotifyToken(userData.spotifyToken?.accessToken || '');
-        setDeviceId(userData.deviceId || '');
+        await refreshUserData();
       }
     }
   };
@@ -185,18 +198,11 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
                     console.error('Playback error:', state.error);
                     setError(`Playback failed: ${state.error.message}`);
                     showToast(`Playback failed: ${state.error.message}`, 'error');
-                    if (state.error.status === 401) {
-                      await handleSpotifyConnect();
-                      const userData = await getUser();
-                      setSpotifyToken(userData.spotifyToken?.accessToken || '');
-                      setDeviceId(userData.deviceId || '');
+                    if (state.error.status === 401 && !refreshingToken) {
+                      await refreshUserData();
                     } else if (state.error.status === 503) {
-                      setTimeout(async () => {
-                        const userData = await getUser();
-                        setSpotifyToken(userData.spotifyToken?.accessToken || '');
-                        setDeviceId(userData.deviceId || '');
-                        showToast('Retrying playback...', 'info');
-                      }, 5000);
+                      showToast('Spotify server issue detected, retrying in 5 seconds...', 'info');
+                      setTimeout(refreshUserData, 5000);
                     }
                   }
                 }}
