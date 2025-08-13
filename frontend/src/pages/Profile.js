@@ -80,12 +80,18 @@ const Profile = () => {
     }],
   };
 
-  // Prepare mood trend data
+  // Prepare mood trend data independently
+  const moodLabels = ['Happy', 'Sad', 'Angry', 'Stressed', 'Calm', 'Neutral'];
+  const getMoodData = () => {
+    if (!latestMood?.mood) return [30, 20, 40, 10, 0, 0]; // Fallback data
+    return moodLabels.map(mood => (latestMood.mood === mood ? 1 : 0));
+  };
+  const moodData = getMoodData();
   const moodTrend = {
-    labels: ['Happy', 'Sad', 'Angry', 'Stressed', 'Calm', 'Neutral'],
+    labels: moodLabels,
     datasets: [{
       label: 'Mood Frequency',
-      data: [0, 0, 0, 0, 0, 0].map((_, i) => latestMood?.mood === moodTrend.labels[i] ? 1 : 0) || [30, 20, 40, 10],
+      data: moodData,
       backgroundColor: 'rgba(71, 85, 105, 0.6)',
       borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 2,
