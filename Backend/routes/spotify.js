@@ -236,7 +236,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
       if (!existingPlaylist) {
         const newPlaylist = new Playlist({
           userId,
-          spotifyTokenId: playlist.id,
+          spotifyPlaylistId: playlist.id,
           name: playlist.name,
           mood: category,
           saved: false,
@@ -349,6 +349,7 @@ router.patch('/playlist/:id', authMiddleware, async (req, res) => {
     );
 
     if (!playlist) {
+      logger.warn('Playlist not found for update', { spotifyPlaylistId: id, userId: req.user.userId });
       return res.status(404).json({ message: 'Playlist not found' });
     }
 

@@ -5,8 +5,10 @@ import { config } from '../config/env.js';
 export const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
 
+  logger.info('Received Authorization header', { authHeader });
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    logger.warn('Authorization header missing or malformed');
+    logger.warn('Authorization header missing or malformed', { authHeader });
     return res.status(401).json({ message: 'Authorization header missing or malformed' });
   }
 
@@ -17,7 +19,7 @@ export const authMiddleware = (req, res, next) => {
     req.user = { userId: decoded.userId }; // Ensure userId is a string from JWT
     next();
   } catch (error) {
-    logger.warn('Invalid token', { error: error.message });
+    logger.warn('Invalid token', { error: error.message, token });
     if (error.name === 'TokenExpiredError') {
       return res.status(401).json({ message: 'Token expired', error: error.message });
     }

@@ -18,6 +18,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
   const [refreshingToken, setRefreshingToken] = useState(false);
+  const [authToken, setAuthToken] = useState(localStorage.getItem('authToken') || '');
 
   const showToast = (message, type = 'success') => {
     const options = {
@@ -40,6 +41,10 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       const userData = await getUser();
       setSpotifyToken(userData.spotifyToken?.accessToken || '');
       setDeviceId(userData.deviceId || '');
+      if (userData.authToken) {
+        setAuthToken(userData.authToken);
+        localStorage.setItem('authToken', userData.authToken);
+      }
     } catch (err) {
       setError(`Failed to fetch user data: ${err.message}`);
       showToast(`Failed to fetch user data: ${err.message}`, 'error');
@@ -54,6 +59,10 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
         const userData = await getUser();
         setSpotifyToken(userData.spotifyToken?.accessToken || '');
         setDeviceId(userData.deviceId || '');
+        if (userData.authToken) {
+          setAuthToken(userData.authToken);
+          localStorage.setItem('authToken', userData.authToken);
+        }
       } catch (err) {
         setError('Failed to fetch user data');
         showToast('Failed to fetch user data', 'error');
@@ -94,13 +103,16 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
   };
 
   const handleSavePlaylist = async () => {
-    if (!currentPlaylist.id) return;
+    if (!currentPlaylist.id || !authToken) return;
     try {
-      await savePlaylist(currentPlaylist.id, { saved: true });
+      const response = await savePlaylist(currentPlaylist.id, { saved: true }, authToken);
       showToast('Playlist saved successfully!');
     } catch (err) {
       setError('Failed to save playlist');
       showToast('Failed to save playlist', 'error');
+      if (err.response?.status === 401) {
+        await refreshUserData();
+      }
     }
   };
 
