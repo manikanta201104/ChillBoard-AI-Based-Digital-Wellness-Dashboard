@@ -5,24 +5,38 @@ import { logger } from '../index.js';
 
 const router = express.Router();
 
+// Helper function to normalize date to IST midnight (UTC+5:30)
+const normalizeToIST = (dateInput) => {
+  let date;
+  const IST_OFFSET = 5.5 * 60 * 60 * 1000; // 5 hours 30 minutes in milliseconds
+
+  if (typeof dateInput === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    date = new Date(dateInput + 'T00:00:00+05:30'); // Treat string as IST
+  } else if (typeof dateInput === 'number') {
+    date = new Date(dateInput);
+  } else if (dateInput instanceof Date) {
+    date = new Date(dateInput);
+  } else {
+    logger.warn('Invalid date format, normalizing to today in IST', { dateInput });
+    date = new Date();
+  }
+
+  // Convert to IST and set to midnight
+  const utcTime = date.getTime();
+  const istTime = utcTime + IST_OFFSET;
+  date = new Date(istTime);
+  date.setUTCHours(-5, -30, 0, 0); // Adjust to IST midnight
+  return date;
+};
+
 // POST /screen-time - Save or update screen time data for the day
 router.post('/', authMiddleware, async (req, res) => {
   let { totalTime, tabs, date, screenTimeId } = req.body;
   const userId = req.user.userId;
 
   try {
-    if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      date = new Date(date + 'T00:00:00Z');
-    } else if (typeof date === 'number') {
-      date = new Date(date);
-      date.setUTCHours(0, 0, 0, 0);
-    } else if (date instanceof Date) {
-      date.setUTCHours(0, 0, 0, 0);
-    } else {
-      logger.warn('Invalid date format, normalizing to today', { date });
-      date = new Date();
-      date.setUTCHours(0, 0, 0, 0);
-    }
+    // Normalize date to IST midnight
+    date = normalizeToIST(date);
 
     if (isNaN(date.getTime())) {
       logger.warn('Invalid date after normalization', { date });
@@ -116,15 +130,14 @@ router.get('/trends', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
-    const oneWeekAgo = new Date();
+    const oneWeekAgo = normalizeToIST(new Date());
     oneWeekAgo.setUTCDate(oneWeekAgo.getUTCDate() - 7);
-    oneWeekAgo.setUTCHours(0, 0, 0, 0);
 
     const trends = await ScreenTime.aggregate([
       { $match: { userId, date: { $gte: oneWeekAgo } } },
       {
         $group: {
-          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date' } },
+          _id: { $dateToString: { format: '%Y-%m-%d', date: '$date', timezone: 'Asia/Kolkata' } },
           totalTime: { $sum: '$totalTime' },
         },
       },
