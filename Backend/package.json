@@ -4,7 +4,7 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-modules index.js",
+    "start": "node index.js",
     "dev": "nodemon index.js",
     "build": "echo \"Building the backend...\"",
     "lint": "eslint .",
