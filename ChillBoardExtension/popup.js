@@ -5,13 +5,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const loginBtn = document.getElementById('login-btn');
   const logoutBtn = document.getElementById('logout-btn');
   const openWebAppBtn = document.getElementById('open-webapp-btn');
+  const openWebAppBtnNewUser = document.getElementById('open-webapp-btn-newuser');
   const totalTimeSpan = document.getElementById('total-time');
   const tabCountSpan = document.getElementById('tab-count');
   const tabUsageList = document.getElementById('tab-usage');
   const emailInput = document.getElementById('email');
   const passwordInput = document.getElementById('password');
-  const trackingStatusSpan = document.getElementById('tracking-status');
-  const currentTabSpan = document.getElementById('current-tab');
 
   let isLoading = false;
   let statsUpdateInterval = null;
@@ -33,6 +32,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function initializePopup() {
     try {
+      // Add subtle loading animation to containers
+      if (loginContainer) loginContainer.style.opacity = '0.7';
+      if (statsContainer) statsContainer.style.opacity = '0.7';
+      
       const result = await getStorageData(['jwt', 'refreshToken']);
       if (result.jwt) {
         const decoded = jwtDecode(result.jwt);
@@ -53,7 +56,14 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (error) {
       console.error('Error initializing popup:', error);
       showLogin();
-      if (loginError) loginError.textContent = 'Error loading extension. Please try again.';
+      if (loginError) {
+        loginError.textContent = 'Error loading extension. Please try again.';
+        loginError.style.animation = 'slideIn 0.3s ease-out';
+      }
+    } finally {
+      // Remove loading animation
+      if (loginContainer) loginContainer.style.opacity = '1';
+      if (statsContainer) statsContainer.style.opacity = '1';
     }
   }
 
@@ -71,10 +81,30 @@ document.addEventListener('DOMContentLoaded', () => {
           console.log('Max retries reached, using local data');
           if (loginError && !navigator.onLine) {
             loginError.textContent = 'Offline mode: Using cached data.';
-            setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
+            loginError.style.background = 'rgba(251, 191, 36, 0.1)';
+            loginError.style.borderColor = 'rgba(251, 191, 36, 0.3)';
+            loginError.style.color = '#d97706';
+            setTimeout(() => { 
+              if (loginError) {
+                loginError.textContent = '';
+                loginError.style.background = '';
+                loginError.style.borderColor = '';
+                loginError.style.color = '';
+              }
+            }, 3000);
           } else if (loginError) {
             loginError.textContent = 'Server connection failed. Showing offline data.';
-            setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
+            loginError.style.background = 'rgba(251, 191, 36, 0.1)';
+            loginError.style.borderColor = 'rgba(251, 191, 36, 0.3)';
+            loginError.style.color = '#d97706';
+            setTimeout(() => { 
+              if (loginError) {
+                loginError.textContent = '';
+                loginError.style.background = '';
+                loginError.style.borderColor = '';
+                loginError.style.color = '';
+              }
+            }, 3000);
           }
           await updateStatsDisplay();
           return false;
@@ -89,8 +119,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (isLoading || isPopupClosing || !navigator.onLine) return false;
     
     isLoading = true;
-    if (totalTimeSpan) totalTimeSpan.textContent = 'Loading...';
-    if (tabCountSpan) tabCountSpan.textContent = '';
+    if (totalTimeSpan) {
+      totalTimeSpan.textContent = 'Loading...';
+      totalTimeSpan.style.opacity = '0.7';
+      totalTimeSpan.style.animation = 'subtlePulse 1.5s infinite';
+    }
+    if (tabCountSpan) {
+      tabCountSpan.textContent = '';
+      tabCountSpan.style.opacity = '0.7';
+    }
     if (tabUsageList) tabUsageList.innerHTML = '';
 
     try {
@@ -145,6 +182,15 @@ document.addEventListener('DOMContentLoaded', () => {
       console.error('Fetch screen time failed:', error.message);
       isLoading = false;
       throw error;
+    } finally {
+      // Remove loading animations
+      if (totalTimeSpan) {
+        totalTimeSpan.style.opacity = '1';
+        totalTimeSpan.style.animation = '';
+      }
+      if (tabCountSpan) {
+        tabCountSpan.style.opacity = '1';
+      }
     }
   }
 
@@ -186,7 +232,10 @@ document.addEventListener('DOMContentLoaded', () => {
       return data.token;
     } catch (error) {
       console.error('Error refreshing JWT:', error.message);
-      if (loginError) loginError.textContent = 'Session expired. Please log in again.';
+      if (loginError) {
+        loginError.textContent = 'Session expired. Please log in again.';
+        loginError.style.animation = 'slideIn 0.3s ease-out';
+      }
       await clearStorageData(['jwt', 'refreshToken']);
       showLogin();
       return null;
@@ -225,15 +274,11 @@ document.addEventListener('DOMContentLoaded', () => {
       await sleep(500);
       
       const response = await sendMessageToBackgroundWithRetry({ action: 'getCurrentStats' }, 5, 1000);
-      let totalTime = 0, tabUsage = [], trackingStatus = null;
+      let totalTime = 0, tabUsage = [];
       
       if (response && response.status === 'success') {
         totalTime = response.totalTime || 0;
         tabUsage = response.tabUsage || [];
-        const statusResponse = await sendMessageToBackgroundWithRetry({ action: 'getTrackingStatus' }, 5, 1000);
-        if (statusResponse && statusResponse.status === 'success') {
-          trackingStatus = statusResponse;
-        }
       } else {
         await useLocalData();
         return;
@@ -241,33 +286,50 @@ document.addEventListener('DOMContentLoaded', () => {
 
       tabUsage = combineTabUsageByUrl(tabUsage);
 
-      if (totalTimeSpan) totalTimeSpan.textContent = isLoading ? 'Loading...' : formatTime(totalTime);
-      if (tabCountSpan) tabCountSpan.textContent = tabUsage.length.toString();
-      if (trackingStatus && trackingStatusSpan) {
-        trackingStatusSpan.textContent = trackingStatus.isTracking ? 'Active' : 'Inactive';
-        trackingStatusSpan.className = trackingStatus.isTracking ? 'status-active' : 'status-inactive';
+      if (totalTimeSpan) {
+        const formattedTime = isLoading ? 'Loading...' : formatTime(totalTime);
+        if (totalTimeSpan.textContent !== formattedTime) {
+          totalTimeSpan.style.transition = 'all 0.3s ease';
+          totalTimeSpan.textContent = formattedTime;
+        }
       }
-      if (trackingStatus && currentTabSpan && trackingStatus.currentTabUrl) {
-        currentTabSpan.textContent = trackingStatus.currentTabUrl;
+      
+      if (tabCountSpan) {
+        const count = tabUsage.length.toString();
+        if (tabCountSpan.textContent !== count) {
+          tabCountSpan.style.transition = 'all 0.3s ease';
+          tabCountSpan.textContent = count;
+        }
       }
 
       if (tabUsageList) {
         tabUsageList.innerHTML = '';
         const sortedTabs = [...tabUsage].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0));
-        sortedTabs.forEach(entry => {
+        sortedTabs.forEach((entry, index) => {
           if (!entry || !entry.url || entry.timeSpent <= 0) return;
           const li = document.createElement('li');
           li.className = 'tab-entry';
+          li.style.animationDelay = `${index * 50}ms`;
+          li.style.animation = 'slideIn 0.4s ease-out forwards';
+          li.style.opacity = '0';
+          
           const urlSpan = document.createElement('span');
           urlSpan.className = 'tab-url';
           urlSpan.textContent = entry.url;
           urlSpan.title = entry.url;
+          
           const timeSpan = document.createElement('span');
           timeSpan.className = 'tab-time';
           timeSpan.textContent = formatTime(entry.timeSpent);
+          
           li.appendChild(urlSpan);
           li.appendChild(timeSpan);
           tabUsageList.appendChild(li);
+          
+          // Trigger animation
+          setTimeout(() => {
+            li.style.opacity = '1';
+          }, 50 + index * 50);
         });
       }
     } catch (error) {
@@ -275,7 +337,17 @@ document.addEventListener('DOMContentLoaded', () => {
       await useLocalData();
       if (loginError) {
         loginError.textContent = 'Error loading stats. Using cached data.';
-        setTimeout(() => { if (loginError) loginError.textContent = ''; }, 3000);
+        loginError.style.background = 'rgba(251, 191, 36, 0.1)';
+        loginError.style.borderColor = 'rgba(251, 191, 36, 0.3)';
+        loginError.style.color = '#d97706';
+        setTimeout(() => { 
+          if (loginError) {
+            loginError.textContent = '';
+            loginError.style.background = '';
+            loginError.style.borderColor = '';
+            loginError.style.color = '';
+          }
+        }, 3000);
       }
     }
   }
@@ -284,33 +356,44 @@ document.addEventListener('DOMContentLoaded', () => {
     const localData = await getStorageData(['totalTime', 'tabUsage', 'lastSyncedTotalTime', 'lastSyncedTabUsage']);
     const totalTime = localData.totalTime || localData.lastSyncedTotalTime || 0;
     const tabUsage = localData.tabUsage || localData.lastSyncedTabUsage || [];
-    const trackingStatus = await getStorageData(['isTracking', 'currentTabUrl']) || { isTracking: false, currentTabUrl: '' };
 
-    if (totalTimeSpan) totalTimeSpan.textContent = formatTime(totalTime);
-    if (tabCountSpan) tabCountSpan.textContent = tabUsage.length.toString();
-    if (trackingStatusSpan) {
-      trackingStatusSpan.textContent = trackingStatus.isTracking ? 'Active' : 'Inactive';
-      trackingStatusSpan.className = trackingStatus.isTracking ? 'status-active' : 'status-inactive';
+    if (totalTimeSpan) {
+      totalTimeSpan.style.transition = 'all 0.3s ease';
+      totalTimeSpan.textContent = formatTime(totalTime);
     }
-    if (currentTabSpan) currentTabSpan.textContent = trackingStatus.currentTabUrl || '';
+    if (tabCountSpan) {
+      tabCountSpan.style.transition = 'all 0.3s ease';
+      tabCountSpan.textContent = tabUsage.length.toString();
+    }
 
     if (tabUsageList) {
       tabUsageList.innerHTML = '';
       const sortedTabs = [...tabUsage].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0));
-      sortedTabs.forEach(entry => {
+      sortedTabs.forEach((entry, index) => {
         if (!entry || !entry.url || entry.timeSpent <= 0) return;
         const li = document.createElement('li');
         li.className = 'tab-entry';
+        li.style.animationDelay = `${index * 50}ms`;
+        li.style.animation = 'slideIn 0.4s ease-out forwards';
+        li.style.opacity = '0';
+        
         const urlSpan = document.createElement('span');
         urlSpan.className = 'tab-url';
         urlSpan.textContent = entry.url;
         urlSpan.title = entry.url;
+        
         const timeSpan = document.createElement('span');
         timeSpan.className = 'tab-time';
         timeSpan.textContent = formatTime(entry.timeSpent);
+        
         li.appendChild(urlSpan);
         li.appendChild(timeSpan);
         tabUsageList.appendChild(li);
+        
+        // Trigger animation
+        setTimeout(() => {
+          li.style.opacity = '1';
+        }, 50 + index * 50);
       });
     }
   }
@@ -332,13 +415,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const password = passwordInput?.value?.trim();
     
     if (!email || !password) {
-      if (loginError) loginError.textContent = 'Please enter email and password';
+      if (loginError) {
+        loginError.textContent = 'Please enter email and password';
+        loginError.style.animation = 'slideIn 0.3s ease-out';
+      }
       return;
     }
 
     if (loginBtn) {
       loginBtn.disabled = true;
       loginBtn.textContent = 'Logging in...';
+      loginBtn.style.opacity = '0.8';
     }
     if (loginError) loginError.textContent = '';
 
@@ -365,6 +452,14 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!decoded) throw new Error('Invalid token received');
 
       await setStorageData({ jwt: data.token, refreshToken: data.refreshToken || null });
+      
+      // Add success animation
+      if (loginBtn) {
+        loginBtn.textContent = 'Success!';
+        loginBtn.style.background = 'linear-gradient(135deg, #10b981, #059669)';
+        await sleep(500);
+      }
+      
       await showStats();
       const currentDate = new Date().toISOString().split('T')[0];
       await fetchScreenTimeWithRetry(data.token, currentDate);
@@ -373,22 +468,48 @@ document.addEventListener('DOMContentLoaded', () => {
       if (loginError) {
         if (error.name === 'AbortError') loginError.textContent = 'Login request timed out. Please try again.';
         else loginError.textContent = error.message || 'Login failed. Please try again.';
+        loginError.style.animation = 'slideIn 0.3s ease-out';
       }
     } finally {
       if (loginBtn) {
         loginBtn.disabled = false;
         loginBtn.textContent = 'Login';
+        loginBtn.style.opacity = '1';
+        loginBtn.style.background = '';
       }
     }
   }
 
   async function handleLogout() {
+    if (logoutBtn) {
+      logoutBtn.disabled = true;
+      logoutBtn.textContent = 'Logging out...';
+      logoutBtn.style.opacity = '0.8';
+    }
+    
     try {
       await clearStorageData(['jwt', 'refreshToken', 'lastServerSync', 'tabStartTime', 'currentTabId', 'currentTabUrl', 'isTracking']);
+      
+      // Add logout animation
+      if (statsContainer) {
+        statsContainer.style.transition = 'opacity 0.3s ease';
+        statsContainer.style.opacity = '0.7';
+        await sleep(200);
+      }
+      
       showLogin();
     } catch (error) {
       console.error('Logout error:', error);
-      if (loginError) loginError.textContent = 'Error during logout. Please try again.';
+      if (loginError) {
+        loginError.textContent = 'Error during logout. Please try again.';
+        loginError.style.animation = 'slideIn 0.3s ease-out';
+      }
+    } finally {
+      if (logoutBtn) {
+        logoutBtn.disabled = false;
+        logoutBtn.textContent = 'Logout';
+        logoutBtn.style.opacity = '1';
+      }
     }
   }
 
@@ -397,8 +518,15 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showLogin() {
-    if (loginContainer) loginContainer.style.display = 'block';
     if (statsContainer) statsContainer.style.display = 'none';
+    if (loginContainer) {
+      loginContainer.style.display = 'block';
+      loginContainer.style.opacity = '0';
+      loginContainer.style.animation = 'slideIn 0.4s ease-out forwards';
+      setTimeout(() => {
+        loginContainer.style.opacity = '1';
+      }, 100);
+    }
     if (emailInput) emailInput.value = '';
     if (passwordInput) passwordInput.value = '';
     if (loginError) loginError.textContent = '';
@@ -410,7 +538,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function showStats() {
     if (loginContainer) loginContainer.style.display = 'none';
-    if (statsContainer) statsContainer.style.display = 'block';
+    if (statsContainer) {
+      statsContainer.style.display = 'block';
+      statsContainer.style.opacity = '0';
+      statsContainer.style.animation = 'slideIn 0.4s ease-out forwards';
+      setTimeout(() => {
+        statsContainer.style.opacity = '1';
+      }, 100);
+    }
     await updateStatsDisplay();
     if (statsUpdateInterval) clearInterval(statsUpdateInterval);
     statsUpdateInterval = setInterval(async () => {
@@ -421,6 +556,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (loginBtn) loginBtn.addEventListener('click', handleLogin);
   if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
   if (openWebAppBtn) openWebAppBtn.addEventListener('click', handleOpenWebApp);
+  if (openWebAppBtnNewUser) openWebAppBtnNewUser.addEventListener('click', handleOpenWebApp);
   if (emailInput) emailInput.addEventListener('keypress', e => e.key === 'Enter' && passwordInput?.focus());
   if (passwordInput) passwordInput.addEventListener('keypress', e => e.key === 'Enter' && handleLogin());
   window.addEventListener('beforeunload', () => { isPopupClosing = true; if (statsUpdateInterval) { clearInterval(statsUpdateInterval); statsUpdateInterval = null; } });
