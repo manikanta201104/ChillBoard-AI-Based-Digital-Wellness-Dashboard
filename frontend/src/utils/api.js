@@ -87,11 +87,10 @@ export const getUser = async () => {
   return response.data;
 };
 
-export const savePlaylist = async (playlistId, data) => {
-  const token = localStorage.getItem('jwt');
-  if (!token) throw new Error('No token found');
+export const savePlaylist = async (playlistId, data, authToken) => {
+  if (!authToken) throw new Error('No auth token provided');
   const response = await api.patch(`/spotify/playlist/${playlistId}`, data, {
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${authToken}` },
   });
   return response.data;
 };
@@ -163,7 +162,7 @@ export const unlinkSpotify = async () => {
 export const getUserPlaylists = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const response = await api.get('/auth/playlists', {
+  const response = await api.get('/spotify/playlists', {
     headers: { Authorization: `Bearer ${token}` },
   });
   return response.data;
@@ -187,7 +186,6 @@ export const sendContactMessage = async (contactData) => {
   return response.data;
 };
 
-// New endpoints for trends
 export const getScreenTimeTrends = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');

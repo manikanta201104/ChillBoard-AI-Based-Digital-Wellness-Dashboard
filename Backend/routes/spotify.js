@@ -14,7 +14,7 @@ const spotifyApi = new SpotifyWebApi({
   redirectUri: process.env.SPOTIFY_REDIRECT_URI,
 });
 
-// Scopes for Spotify permissions (added user-modify-playback-state)
+// Scopes for Spotify permissions
 const scopes = [
   'user-read-private',
   'streaming',
@@ -76,7 +76,6 @@ const refreshAccessToken = async (userId, refreshToken) => {
       statusCode: err.statusCode,
     });
     if (err.body && err.body.error === 'invalid_grant') {
-      // Clear invalid token and force re-authentication
       await User.findOneAndUpdate(
         { userId },
         { $unset: { spotifyToken: 1 } },
@@ -131,7 +130,7 @@ router.get('/callback', async (req, res) => {
     );
 
     logger.info('Spotify tokens saved for player', { userId });
-    res.redirect('https://chillboard.vercel.app//dashboard');
+    res.redirect('https://chillboard.vercel.app/dashboard');
   } catch (err) {
     logger.error('Error in Spotify callback', { error: err.message, stack: err.stack });
     if (err.body && err.body.error === 'invalid_grant') {
@@ -141,6 +140,20 @@ router.get('/callback', async (req, res) => {
   }
 });
 
+// GET /spotify/playlists
+router.get('/playlists', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const playlists = await Playlist.find({ userId });
+    logger.info('Fetched user playlists', { userId, playlistCount: playlists.length });
+    res.status(200).json(playlists);
+  } catch (err) {
+    logger.error('Error fetching playlists', { error: err.message, stack: err.stack });
+    res.status(500).json({ message: 'Server error', error: err.message });
+  }
+});
+
+// GET /spotify/playlist
 router.get('/playlist', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
   const mood = req.query.mood || 'default';
@@ -157,7 +170,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
     const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
 
     let currentAccessToken = accessToken;
-    if (now >= tokenExpiry - 300000) { // Refresh if token expires within 5 minutes
+    if (now >= tokenExpiry - 300000) {
       logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
       try {
         currentAccessToken = await refreshAccessToken(userId, refreshToken);
@@ -207,7 +220,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
           playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
         } else if (searchErr.statusCode === 500) {
           logger.error('Spotify server error, retrying after delay', { userId });
-          await new Promise(resolve => setTimeout(resolve, 5000)); // 5-second delay
+          await new Promise(resolve => setTimeout(resolve, 5000));
           playlists = await spotifyApi.searchPlaylists(`category:${category}`, { limit: 10 });
         } else {
           throw searchErr;
@@ -262,7 +275,7 @@ router.get('/playlist', authMiddleware, async (req, res) => {
   }
 });
 
-// New endpoint to control playback with device cleanup
+// POST /spotify/play
 router.post('/play', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
   const { device_id, playlist_id, offset } = req.body;
@@ -275,7 +288,7 @@ router.post('/play', authMiddleware, async (req, res) => {
 
     const { accessToken, refreshToken, expiresIn, obtainedAt } = user.spotifyToken;
     const now = Date.now();
-    const tokenExpiry = new Date(obtainedAt).getTime() + expires_in * 1000;
+    const tokenExpiry = new Date(obtainedAt).getTime() + expiresIn * 1000;
 
     let currentAccessToken = accessToken;
     if (now >= tokenExpiry - 300000) {
@@ -297,7 +310,6 @@ router.post('/play', authMiddleware, async (req, res) => {
       spotifyApi.setAccessToken(currentAccessToken);
     }
 
-    // Attempt to transfer playback and start
     try {
       await spotifyApi.transferMyPlayback([device_id]);
       logger.info('Playback transferred to device', { userId, device_id });
@@ -312,7 +324,6 @@ router.post('/play', authMiddleware, async (req, res) => {
       throw transferErr;
     }
 
-    // Attempt to start playback
     await spotifyApi.play({
       device_id,
       context_uri: `spotify:playlist:${playlist_id}`,
@@ -337,30 +348,35 @@ router.post('/play', authMiddleware, async (req, res) => {
   }
 });
 
+// PATCH /spotify/playlist/:id
 router.patch('/playlist/:id', authMiddleware, async (req, res) => {
   const { id } = req.params;
   const { saved } = req.body;
 
   try {
-    const playlist = await Playlist.findOneAndUpdate(
-      { spotifyPlaylistId: id, userId: req.user.userId },
-      { saved: saved === true },
-      { new: true, runValidators: true }
-    );
-
+    const playlist = await Playlist.findOne({ spotifyPlaylistId: id, userId: req.user.userId });
     if (!playlist) {
       logger.warn('Playlist not found for update', { spotifyPlaylistId: id, userId: req.user.userId });
       return res.status(404).json({ message: 'Playlist not found' });
     }
-
-    logger.info('Playlist updated', { spotifyPlaylistId: id, saved: playlist.saved });
-    res.status(200).json(playlist);
+    if (playlist.saved && saved === true) {
+      logger.info('Playlist already saved', { spotifyPlaylistId: id, userId: req.user.userId });
+      return res.status(200).json({ message: 'Playlist already saved', playlist });
+    }
+    const updatedPlaylist = await Playlist.findOneAndUpdate(
+      { spotifyPlaylistId: id, userId: req.user.userId },
+      { saved: saved === true },
+      { new: true, runValidators: true }
+    );
+    logger.info('Playlist updated', { spotifyPlaylistId: id, saved: updatedPlaylist.saved });
+    res.status(200).json(updatedPlaylist);
   } catch (err) {
     logger.error('Error updating playlist', { error: err.message, stack: err.stack });
     res.status(500).json({ message: 'Server error', error: err.message });
   }
 });
 
+// DELETE /spotify/unlink
 router.delete('/unlink', authMiddleware, async (req, res) => {
   try {
     const userId = req.user.userId;
