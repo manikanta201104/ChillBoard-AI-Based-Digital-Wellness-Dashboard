@@ -2,22 +2,21 @@ name: Build and Push Backend Docker Image to GHCR
 
 on:
   push:
-    branches: [ main ]  # Change if your default branch is not "main"
+    branches: [ main ]  
 
 permissions:
   contents: read
   packages: write
+  id-token: write   
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1 — Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Step 2 — Log in to GitHub Container Registry
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
@@ -25,7 +24,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Step 3 — Extract Docker metadata
       - name: Extract Docker metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -35,12 +33,29 @@ jobs:
             type=raw,value=latest
             type=raw,value=${{ github.sha }}
 
-      # Step 4 — Build and push Docker image (pointing to backend folder)
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
-          context: ./Backend      # <<<<<< Path to your backend folder
-          file: ./Backend/Dockerfile  # <<<<<< Explicit Dockerfile path
+          context: ./Backend     
+          file: ./Backend/Dockerfile  
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3.6.0
+
+      - name: Cosign sign image
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}-backend
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' $IMAGE:latest)
+          echo "Signing $DIGEST"
+
+          for i in 1 2 3; do
+            if cosign sign --yes $DIGEST; then
+              echo "✅ Cosign signing succeeded"
+              break
+            fi
+            echo "⚠️ Cosign signing failed, retrying in 30s... (attempt $i)"
+            sleep 30
+          done
