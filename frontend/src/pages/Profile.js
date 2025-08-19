@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Bar, Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js';
-import { getUser, getUserPlaylists, unlinkSpotify, initiateSpotifyLogin, getScreenTime, getLatestMood } from '../utils/api';
+import { Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import { getUser, getUserPlaylists, unlinkSpotify, initiateSpotifyLogin, getScreenTime } from '../utils/api';
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend);
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
 const Profile = () => {
   const [userData, setUserData] = useState({ username: '', email: '' });
@@ -12,7 +12,9 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [screenTimeData, setScreenTimeData] = useState([]);
-  const [latestMood, setLatestMood] = useState(null);
+  const [selectedPeriod, setSelectedPeriod] = useState('last7days');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -31,10 +33,7 @@ const Profile = () => {
         setSpotifyToken(user.spotifyToken?.accessToken || '');
 
         const screenTimeResponse = await getScreenTime();
-        setScreenTimeData(screenTimeResponse);
-
-        const moodResponse = await getLatestMood();
-        setLatestMood(moodResponse);
+        setScreenTimeData(screenTimeResponse.sort((a, b) => new Date(a.date) - new Date(b.date)));
       } catch (err) {
         setError('Failed to fetch data: ' + err.message);
       } finally {
@@ -67,31 +66,98 @@ const Profile = () => {
     }
   };
 
-  // Prepare screen time trend data
-  const screenTimeTrend = {
-    labels: screenTimeData.map(d => `Week ${new Date(d.date).getUTCDate()}`) || ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-    datasets: [{
-      label: 'Average Screen Time (hours)',
-      data: screenTimeData.map(d => d.totalTime / 3600) || [6, 5.5, 5, 4.5],
-      backgroundColor: 'rgba(71, 85, 105, 0.6)',
-      borderColor: 'rgba(71, 85, 105, 1)',
-      borderWidth: 2,
-      borderRadius: 4,
-    }],
+  const getFilteredScreenTime = () => {
+    if (!screenTimeData.length) return [];
+
+    const today = new Date();
+    let start = new Date();
+    let end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+
+    switch (selectedPeriod) {
+      case 'today':
+        start = new Date(today);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'yesterday':
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'thisWeek':
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay()); // Sunday start
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'lastWeek':
+        const startOfThisWeek = new Date(today);
+        startOfThisWeek.setDate(startOfThisWeek.getDate() - startOfThisWeek.getDay());
+        start = new Date(startOfThisWeek);
+        start.setDate(start.getDate() - 7);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'last7days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'thisMonth':
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'lastMonth':
+        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(today.getFullYear(), today.getMonth(), 0);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'last30days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 29);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'last90days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 89);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'last365days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 364);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'custom':
+        if (!customStart || !customEnd) return [];
+        start = new Date(customStart);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(customEnd);
+        end.setHours(23, 59, 59, 999);
+        break;
+      default:
+        return [];
+    }
+
+    return screenTimeData
+      .filter(entry => {
+        const entryDate = new Date(entry.date);
+        return entryDate >= start && entryDate <= end;
+      })
+      .sort((a, b) => new Date(a.date) - new Date(b.date));
   };
 
-  // Prepare mood trend data independently
-  const moodLabels = ['Happy', 'Sad', 'Angry', 'Stressed', 'Calm', 'Neutral'];
-  const getMoodData = () => {
-    if (!latestMood?.mood) return [30, 20, 40, 10, 0, 0]; // Fallback data
-    return moodLabels.map(mood => (latestMood.mood === mood ? 1 : 0));
-  };
-  const moodData = getMoodData();
-  const moodTrend = {
-    labels: moodLabels,
+  const filteredScreenTime = getFilteredScreenTime();
+
+  // Prepare screen time trend data
+  const screenTimeTrend = {
+    labels: filteredScreenTime.map(d => new Date(d.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })) || ['No data'],
     datasets: [{
-      label: 'Mood Frequency',
-      data: moodData,
+      label: 'Screen Time (hours)',
+      data: filteredScreenTime.map(d => (d.totalTime / 3600).toFixed(2)) || [0],
       backgroundColor: 'rgba(71, 85, 105, 0.6)',
       borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 2,
@@ -107,6 +173,21 @@ const Profile = () => {
       x: { grid: { color: 'rgba(148, 163, 184, 0.1)' }, ticks: { color: '#64748b' } },
     },
   };
+
+  // Define period buttons with their display names
+  const periodButtons = [
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'last7days', label: 'Last 7 Days' },
+    { value: 'thisWeek', label: 'This Week' },
+    { value: 'lastWeek', label: 'Last Week' },
+    { value: 'thisMonth', label: 'This Month' },
+    { value: 'lastMonth', label: 'Last Month' },
+    { value: 'last30days', label: 'Last 30 Days' },
+    { value: 'last90days', label: 'Last 3 Months' },
+    { value: 'last365days', label: 'Last Year' },
+    { value: 'custom', label: 'Custom Range' }
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
@@ -185,43 +266,77 @@ const Profile = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="bg-white rounded-lg shadow-sm border border-slate-200">
-                <div className="p-6 border-b border-slate-200">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {/* Screen Time Trends Section */}
+            <div className="bg-white rounded-lg shadow-sm border border-slate-200">
+              <div className="p-6 border-b border-slate-200">
+                <div className="flex items-center space-x-3">
+                  <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-semibold text-slate-700">Screen Time Trends</h3>
+                    <p className="text-slate-500 text-sm">Screen time for selected period</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-6">
+                {/* Period Selection Buttons */}
+                <div className="mb-8">
+                  <div className="flex flex-wrap justify-center gap-2 mb-4">
+                    {periodButtons.map(period => (
+                      <button
+                        key={period.value}
+                        onClick={() => setSelectedPeriod(period.value)}
+                        className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                          selectedPeriod === period.value
+                            ? 'bg-slate-600 text-white shadow-sm'
+                            : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50'
+                        }`}
+                      >
+                        {period.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {selectedPeriod === 'custom' && (
+                    <div className="flex justify-center space-x-4 mt-4">
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">Start Date</label>
+                        <input
+                          type="date"
+                          value={customStart}
+                          onChange={(e) => setCustomStart(e.target.value)}
+                          className="px-4 py-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm text-slate-600 mb-1">End Date</label>
+                        <input
+                          type="date"
+                          value={customEnd}
+                          onChange={(e) => setCustomEnd(e.target.value)}
+                          className="px-4 py-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Chart */}
+                {filteredScreenTime.length > 0 ? (
+                  <Bar data={screenTimeTrend} options={chartOptions} />
+                ) : (
+                  <div className="text-center py-12">
+                    <div className="w-16 h-16 bg-slate-100 rounded-full mx-auto mb-4 flex items-center justify-center">
+                      <svg className="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                       </svg>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-semibold text-slate-700">Screen Time Trends</h3>
-                      <p className="text-slate-500 text-sm">Weekly screen time averages</p>
-                    </div>
+                    <p className="text-slate-600 text-sm">No screen time data available for the selected period.</p>
                   </div>
-                </div>
-                <div className="p-6">
-                  <Bar data={screenTimeTrend} options={chartOptions} />
-                </div>
-              </div>
-
-              <div className="bg-white rounded-lg shadow-sm border border-slate-200">
-                <div className="p-6 border-b border-slate-200">
-                  <div className="flex items-center space-x-3">
-                    <div className="w-8 h-8 bg-slate-100 rounded-lg flex items-center justify-center">
-                      <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-semibold text-slate-700">Mood Trends</h3>
-                      <p className="text-slate-500 text-sm">Current mood analysis</p>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-6">
-                  <Bar data={moodTrend} options={chartOptions} />
-                </div>
+                )}
               </div>
             </div>
 

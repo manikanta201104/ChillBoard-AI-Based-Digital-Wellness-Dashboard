@@ -31,6 +31,9 @@ const Dashboard = () => {
   const timerRef = useRef(null);
   const updateIntervalRef = useRef(null);
   const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+  const [selectedPeriod, setSelectedPeriod] = useState('last7days');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
 
   const showToast = (message, type = 'success') => {
     const options = {
@@ -107,7 +110,6 @@ const Dashboard = () => {
       if (joined) {
         const data = await getLeaderboard(joined.challengeId);
         setLeaderboard(data.slice(0, 3));
-        showToast('Leaderboard fetched successfully!');
       } else {
         setLeaderboard([]);
         showToast('No leaderboard data available', 'info');
@@ -187,13 +189,99 @@ const Dashboard = () => {
     }
   };
 
-  const today = new Date().toISOString().split('T')[0];
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const getFilteredScreenTime = () => {
+    if (!screenTimeData.length) return [];
+
+    const today = new Date();
+    let start = new Date();
+    let end = new Date(today);
+    end.setHours(23, 59, 59, 999);
+
+    switch (selectedPeriod) {
+      case 'today':
+        start = new Date(today);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'yesterday':
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(start);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'thisWeek':
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay()); // Sunday start
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'lastWeek':
+        const startOfThisWeek = new Date(today);
+        startOfThisWeek.setDate(startOfThisWeek.getDate() - startOfThisWeek.getDay());
+        start = new Date(startOfThisWeek);
+        start.setDate(start.getDate() - 7);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'last7days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 6);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'thisMonth':
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'lastMonth':
+        start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(today.getFullYear(), today.getMonth(), 0);
+        end.setHours(23, 59, 59, 999);
+        break;
+      case 'last30days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 29);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'last90days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 89);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'last365days':
+        start = new Date(today);
+        start.setDate(start.getDate() - 364);
+        start.setHours(0, 0, 0, 0);
+        break;
+      case 'custom':
+        if (!customStart || !customEnd) return [];
+        start = new Date(customStart);
+        start.setHours(0, 0, 0, 0);
+        end = new Date(customEnd);
+        end.setHours(23, 59, 59, 999);
+        break;
+      default:
+        return [];
+    }
+
+    return screenTimeData
+      .filter(entry => {
+        const entryDate = new Date(entry.date);
+        return entryDate >= start && entryDate <= end;
+      })
+      .sort((a, b) => new Date(a.date) - new Date(b.date)); // Ascending for chart
+  };
+
+  const filteredScreenTime = getFilteredScreenTime();
 
   const barChartData = {
-    labels: screenTimeData.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
+    labels: filteredScreenTime.map(entry => new Date(entry.date).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })),
     datasets: [{
       label: 'Screen Time (minutes)',
-      data: screenTimeData.map(entry => Math.floor(entry.totalTime / 60)),
+      data: filteredScreenTime.map(entry => Math.floor(entry.totalTime / 60)),
       backgroundColor: 'rgba(71, 85, 105, 0.7)',
       borderColor: 'rgba(71, 85, 105, 1)',
       borderWidth: 1,
@@ -202,7 +290,7 @@ const Dashboard = () => {
 
   const tabUsageMap = {};
   screenTimeData
-    .filter(entry => new Date(entry.date).toISOString().split('T')[0] === today)
+    .filter(entry => new Date(entry.date).toISOString().split('T')[0] === todayStr)
     .forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
 
   // Define varied colors for pie chart that match our UI theme
@@ -233,6 +321,21 @@ const Dashboard = () => {
   };
 
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
+
+  // Define period buttons with their display names
+  const periodButtons = [
+    { value: 'today', label: 'Today' },
+    { value: 'yesterday', label: 'Yesterday' },
+    { value: 'last7days', label: 'Last 7 Days' },
+    { value: 'thisWeek', label: 'This Week' },
+    { value: 'lastWeek', label: 'Last Week' },
+    { value: 'thisMonth', label: 'This Month' },
+    { value: 'lastMonth', label: 'Last Month' },
+    { value: 'last30days', label: 'Last 30 Days' },
+    { value: 'last90days', label: 'Last 3 Months' },
+    { value: 'last365days', label: 'Last Year' },
+    { value: 'custom', label: 'Custom Range' }
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 space-y-8">
@@ -449,11 +552,53 @@ const Dashboard = () => {
           <p className="text-slate-500">Monitor your digital wellness progress</p>
         </div>
 
+        {/* Period Selection Buttons */}
+        <div className="mb-8">
+          <div className="flex flex-wrap justify-center gap-2 mb-4">
+            {periodButtons.map(period => (
+              <button
+                key={period.value}
+                onClick={() => setSelectedPeriod(period.value)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                  selectedPeriod === period.value
+                    ? 'bg-slate-600 text-white shadow-sm'
+                    : 'bg-white text-slate-600 border border-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {period.label}
+              </button>
+            ))}
+          </div>
+
+          {selectedPeriod === 'custom' && (
+            <div className="flex justify-center space-x-4 mt-4">
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">Start Date</label>
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="px-4 py-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-600 mb-1">End Date</label>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="px-4 py-2 bg-white border border-slate-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-transparent"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Screen Time Chart */}
           <div className="bg-white rounded-lg shadow-sm border border-slate-200 p-6">
             <h3 className="text-lg font-medium text-slate-700 mb-4">Daily Screen Time</h3>
-            {screenTimeData.length > 0 ? (
+            {filteredScreenTime.length > 0 ? (
               <Bar
                 data={barChartData}
                 options={{
@@ -475,7 +620,7 @@ const Dashboard = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                   </svg>
                 </div>
-                <p className="text-slate-600 text-sm">No screen time data available.</p>
+                <p className="text-slate-600 text-sm">No screen time data available for the selected period.</p>
               </div>
             )}
           </div>

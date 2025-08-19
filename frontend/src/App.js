@@ -6,6 +6,7 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import About from './pages/About';
 import Navbar from './components/Navbar';
+import Privacy from './pages/Privacy';
 
 const ProtectedLayout = () => {
   // Check if user is authenticated (e.g., userId exists in localStorage)
@@ -30,6 +31,7 @@ function App() {
           <Route path="/profile" element={<Profile />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
+          <Route path="/privacy" element={<Privacy />} />
         </Route>
       </Routes>
     </Router>

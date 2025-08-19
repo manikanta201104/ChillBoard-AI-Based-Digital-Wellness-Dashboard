@@ -11,6 +11,7 @@ router.post('/', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
 
   try {
+    // Normalize date
     if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
       date = new Date(date + 'T00:00:00Z');
     } else if (typeof date === 'number') {
@@ -29,22 +30,36 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
+    // Validate totalTime
     if (typeof totalTime !== 'number' || totalTime < 0) {
       logger.warn('Invalid totalTime', { totalTime });
       return res.status(400).json({ message: 'Invalid totalTime' });
     }
+
+    // Validate tabs
     if (!Array.isArray(tabs)) {
       logger.warn('Tabs must be an array', { tabs });
       return res.status(400).json({ message: 'Tabs must be an array' });
     }
 
+    // Relaxed validation to include tabs with low timeSpent
     const validTabs = tabs.filter((tab) => {
-      if (!tab.url || typeof tab.timeSpent !== 'number' || tab.timeSpent < 0) {
-        logger.warn('Invalid tab data skipped:', tab);
+      if (!tab.url || typeof tab.url !== 'string' || typeof tab.timeSpent !== 'number') {
+        logger.warn('Invalid tab data skipped:', { tab });
         return false;
       }
-      return true;
+      return true; // Allow tabs with timeSpent >= 0
     });
+
+    // Calculate sum of tab times for consistency check
+    const tabsTotalTime = validTabs.reduce((sum, tab) => sum + (tab.timeSpent || 0), 0);
+    if (totalTime < tabsTotalTime) {
+      logger.warn('totalTime is less than sum of tabs.timeSpent, adjusting', {
+        totalTime,
+        tabsTotalTime,
+      });
+      totalTime = tabsTotalTime; // Trust tab times if higher
+    }
 
     if (!screenTimeId) {
       screenTimeId = `st_${Date.now()}_${userId}`;
@@ -53,6 +68,7 @@ router.post('/', authMiddleware, async (req, res) => {
 
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
+      // Update existing record
       screenTime.totalTime += totalTime;
       const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
       validTabs.forEach((tab) => {
@@ -61,6 +77,7 @@ router.post('/', authMiddleware, async (req, res) => {
       screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
       screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
     } else {
+      // Create new record
       screenTime = new ScreenTime({
         screenTimeId,
         userId,
@@ -71,7 +88,12 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     await screenTime.save();
-    logger.info('Screen time saved or updated', { userId, date: screenTime.date.toISOString(), totalTime: screenTime.totalTime, tabs: screenTime.tabs });
+    logger.info('Screen time saved or updated', {
+      userId,
+      date: screenTime.date.toISOString(),
+      totalTime: screenTime.totalTime,
+      tabs: screenTime.tabs,
+    });
     res.status(201).json({ message: 'Screen time saved or updated', screenTime });
   } catch (error) {
     if (error.code === 11000) {
@@ -85,7 +107,11 @@ router.post('/', authMiddleware, async (req, res) => {
           });
           screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
           await screenTime.save();
-          logger.info('Merged duplicate screen time', { userId, date: screenTime.date.toISOString(), totalTime: screenTime.totalTime });
+          logger.info('Merged duplicate screen time', {
+            userId,
+            date: screenTime.date.toISOString(),
+            totalTime: screenTime.totalTime,
+          });
           return res.status(201).json({ message: 'Screen time merged', screenTime });
         }
       } catch (mergeError) {
@@ -104,7 +130,12 @@ router.get('/', authMiddleware, async (req, res) => {
 
   try {
     const screenTimeData = await ScreenTime.find({ userId }).sort({ date: -1 });
-    res.status(200).json(screenTimeData);
+    const formattedData = screenTimeData.map((data) => {
+      const obj = data.toObject();
+      obj.date = data.date.toISOString().split('T')[0];
+      return obj;
+    });
+    res.status(200).json(formattedData);
   } catch (error) {
     logger.error('Error fetching screen time:', error);
     res.status(500).json({ message: 'Server error' });
@@ -131,8 +162,8 @@ router.get('/trends', authMiddleware, async (req, res) => {
       { $sort: { _id: 1 } },
     ]).exec();
 
-    const labels = trends.map(t => `Week ${new Date(t._id).getUTCDate()}`);
-    const data = trends.map(t => t.totalTime / 3600); // Convert to hours
+    const labels = trends.map((t) => `Week ${new Date(t._id).getUTCDate()}`);
+    const data = trends.map((t) => t.totalTime / 3600); // Convert to hours
 
     res.status(200).json({ labels, data });
   } catch (error) {

@@ -58,6 +58,12 @@ const Navbar = () => {
               >
                 About
               </Link>
+              <Link 
+                to="/privacy" 
+                className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
+              >
+                Privacy
+              </Link>
             </div>
           </div>
 
