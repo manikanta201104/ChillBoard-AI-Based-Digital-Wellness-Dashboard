@@ -19,6 +19,8 @@ const scopes = [
   'user-read-private',
   'streaming',
   'user-read-email',
+  'user-read-playback-state',    // Added for fetching devices and playback state
+  'user-modify-playback-state',
 ];
 
 // Mood to Spotify category mapping
@@ -280,6 +282,10 @@ router.post('/play', authMiddleware, async (req, res) => {
   const userId = req.user.userId;
   const { device_id, playlist_id, offset } = req.body;
 
+  if (!device_id || !playlist_id) {
+    return res.status(400).json({ message: 'Missing device_id or playlist_id' });
+  }
+
   try {
     const user = await User.findOne({ userId });
     if (!user || !user.spotifyToken || !user.spotifyToken.accessToken) {
@@ -293,37 +299,36 @@ router.post('/play', authMiddleware, async (req, res) => {
     let currentAccessToken = accessToken;
     if (now >= tokenExpiry - 300000) {
       logger.info('Token nearing expiry or expired, refreshing', { userId, tokenExpiry });
-      try {
-        currentAccessToken = await refreshAccessToken(userId, refreshToken);
-        if (!currentAccessToken) {
-          throw new Error('Failed to refresh access token');
-        }
-        spotifyApi.setAccessToken(currentAccessToken);
-      } catch (refreshErr) {
-        if (refreshErr.message.includes('re-authenticate')) {
-          return res.status(401).json({ message: 'Invalid refresh token, please re-authenticate with Spotify', redirect: '/spotify/login' });
-        }
-        throw refreshErr;
-      }
+      currentAccessToken = await refreshAccessToken(userId, refreshToken);
+      spotifyApi.setAccessToken(currentAccessToken);
     } else {
-      logger.info('Token still valid', { userId, tokenExpiry });
       spotifyApi.setAccessToken(currentAccessToken);
     }
 
+    // Validate playlist exists and is accessible
+    try {
+      await spotifyApi.getPlaylist(playlist_id);
+    } catch (playlistErr) {
+      logger.error('Invalid playlist', { playlist_id, error: playlistErr.message });
+      return res.status(404).json({ message: 'Invalid or inaccessible playlist' });
+    }
+
+    // Transfer playback to device
     try {
       await spotifyApi.transferMyPlayback([device_id]);
       logger.info('Playback transferred to device', { userId, device_id });
     } catch (transferErr) {
-      if (transferErr.statusCode === 403) {
-        logger.warn('Transfer failed: Restriction violated', { userId, device_id, error: transferErr.message });
-        return res.status(403).json({
-          message: 'Transfer failed: Restriction violated',
-          error: { reason: transferErr.body?.error?.reason || 'UNKNOWN' },
+      if (transferErr.statusCode === 403 || transferErr.statusCode === 404) {
+        logger.warn('Transfer failed', { userId, device_id, reason: transferErr.body?.error?.reason || 'UNKNOWN' });
+        return res.status(transferErr.statusCode).json({
+          message: 'Failed to transfer playback. Ensure device is active and open Spotify.',
+          error: transferErr.body || { reason: 'UNKNOWN' },
         });
       }
       throw transferErr;
     }
 
+    // Start playback
     await spotifyApi.play({
       device_id,
       context_uri: `spotify:playlist:${playlist_id}`,
@@ -338,10 +343,12 @@ router.post('/play', authMiddleware, async (req, res) => {
       stack: err.stack,
       statusCode: err.statusCode,
     });
-    if (err.statusCode === 403) {
+    if (err.statusCode === 401) {
+      return res.status(401).json({ message: 'Permissions missing or token invalid. Re-authenticate.' });
+    } else if (err.statusCode === 403) {
       return res.status(403).json({
         message: 'Playback failed: Restriction violated',
-        error: err.body ? err.body : { reason: 'UNKNOWN' },
+        error: err.body || { reason: 'UNKNOWN' },
       });
     }
     res.status(500).json({ message: 'Server error', error: err.message });
