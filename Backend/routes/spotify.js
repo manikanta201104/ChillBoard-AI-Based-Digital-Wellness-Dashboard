@@ -14,11 +14,12 @@ const spotifyApi = new SpotifyWebApi({
   redirectUri: process.env.SPOTIFY_REDIRECT_URI,
 });
 
-// Scopes for Spotify permissions
+// Updated scopes including user-read-playback-state
 const scopes = [
   'user-read-private',
   'streaming',
   'user-read-email',
+  'user-read-playback-state', // Added for device retrieval
 ];
 
 // Mood to Spotify category mapping
@@ -318,7 +319,7 @@ router.post('/play', authMiddleware, async (req, res) => {
         logger.warn('Transfer failed: Restriction violated', { userId, device_id, error: transferErr.message });
         return res.status(403).json({
           message: 'Transfer failed: Restriction violated',
-          error: { reason: 'UNKNOWN' },
+          error: { reason: transferErr.body?.error?.reason || 'UNKNOWN' },
         });
       }
       throw transferErr;
