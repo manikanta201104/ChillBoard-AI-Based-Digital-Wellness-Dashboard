@@ -20,6 +20,7 @@ const scopes = [
   'streaming',
   'user-read-email',
   'user-read-playback-state', // Added for device retrieval
+  'user-modify-playback-state',
 ];
 
 // Mood to Spotify category mapping
@@ -311,12 +312,13 @@ router.post('/play', authMiddleware, async (req, res) => {
       spotifyApi.setAccessToken(currentAccessToken);
     }
 
+    // Transfer playback to the specified device
     try {
       await spotifyApi.transferMyPlayback([device_id]);
       logger.info('Playback transferred to device', { userId, device_id });
     } catch (transferErr) {
       if (transferErr.statusCode === 403) {
-        logger.warn('Transfer failed: Restriction violated', { userId, device_id, error: transferErr.message });
+        logger.warn('Transfer failed: Restriction violated', { userId, device_id, error: transferErr.body?.error?.reason || 'UNKNOWN' });
         return res.status(403).json({
           message: 'Transfer failed: Restriction violated',
           error: { reason: transferErr.body?.error?.reason || 'UNKNOWN' },
@@ -325,6 +327,7 @@ router.post('/play', authMiddleware, async (req, res) => {
       throw transferErr;
     }
 
+    // Start playback
     await spotifyApi.play({
       device_id,
       context_uri: `spotify:playlist:${playlist_id}`,
@@ -340,8 +343,14 @@ router.post('/play', authMiddleware, async (req, res) => {
       statusCode: err.statusCode,
     });
     if (err.statusCode === 403) {
+      let errorMessage = 'Playback failed: Restriction violated';
+      if (err.body?.error?.reason === 'PREMIUM_REQUIRED') {
+        errorMessage = 'Playback requires a Spotify Premium account. Please upgrade or use a Premium account.';
+      } else if (err.body?.error?.reason === 'NO_ACTIVE_DEVICE') {
+        errorMessage = 'No active device found. Please open Spotify and start playback manually.';
+      }
       return res.status(403).json({
-        message: 'Playback failed: Restriction violated',
+        message: errorMessage,
         error: err.body ? err.body : { reason: 'UNKNOWN' },
       });
     }
