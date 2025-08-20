@@ -53,7 +53,7 @@ app.use(cors({
     // Block everything else
     return callback(new Error('Not allowed by CORS'));
   },
-  methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE','PUT'],
+  methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true
 }));
