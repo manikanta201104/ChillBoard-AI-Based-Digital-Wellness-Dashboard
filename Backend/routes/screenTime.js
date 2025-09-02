@@ -61,34 +61,26 @@ router.post('/', authMiddleware, async (req, res) => {
       totalTime = tabsTotalTime; // Trust tab times if higher
     }
 
-    if (!screenTimeId) {
-      screenTimeId = `st_${Date.now()}_${userId}`;
-      logger.info('Generated screenTimeId', { screenTimeId });
-    }
-
+    // FIX: Replace existing record for the same userId and date instead of updating additively
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Update existing record
-      screenTime.totalTime += totalTime;
-      const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
-      validTabs.forEach((tab) => {
-        existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
-      });
-      screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
-      screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
+      // Replace totalTime and tabs
+      screenTime.totalTime = Math.min(totalTime, 86400); // Cap at 24h
+      screenTime.tabs = validTabs.map(tab => ({ url: tab.url, timeSpent: tab.timeSpent })); // Replace, no merge/add
+      screenTime.screenTimeId = screenTimeId || screenTime.screenTimeId;
     } else {
       // Create new record
       screenTime = new ScreenTime({
-        screenTimeId,
+        screenTimeId: screenTimeId || `st_${Date.now()}_${userId}`,
         userId,
         date,
-        totalTime,
+        totalTime: Math.min(totalTime, 86400), // Cap at 24h
         tabs: validTabs,
       });
     }
 
     await screenTime.save();
-    logger.info('Screen time saved or updated', {
+    logger.info('Screen time replaced/updated', {
       userId,
       date: screenTime.date.toISOString(),
       totalTime: screenTime.totalTime,
@@ -96,29 +88,6 @@ router.post('/', authMiddleware, async (req, res) => {
     });
     res.status(201).json({ message: 'Screen time saved or updated', screenTime });
   } catch (error) {
-    if (error.code === 11000) {
-      try {
-        const screenTime = await ScreenTime.findOne({ userId, date });
-        if (screenTime) {
-          screenTime.totalTime += totalTime;
-          const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
-          validTabs.forEach((tab) => {
-            existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
-          });
-          screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
-          await screenTime.save();
-          logger.info('Merged duplicate screen time', {
-            userId,
-            date: screenTime.date.toISOString(),
-            totalTime: screenTime.totalTime,
-          });
-          return res.status(201).json({ message: 'Screen time merged', screenTime });
-        }
-      } catch (mergeError) {
-        logger.error('Error merging duplicate screen time:', mergeError);
-        return res.status(500).json({ message: 'Server error during merge' });
-      }
-    }
     logger.error('Error saving screen time:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
