@@ -61,12 +61,23 @@ router.post('/', authMiddleware, async (req, res) => {
       totalTime = tabsTotalTime; // Trust tab times if higher
     }
 
-    // FIX: Replace existing record for the same userId and date instead of updating additively
+    // Updated: Accumulate additively instead of replacing
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
-      // Replace totalTime and tabs
-      screenTime.totalTime = Math.min(totalTime, 86400); // Cap at 24h
-      screenTime.tabs = validTabs.map(tab => ({ url: tab.url, timeSpent: tab.timeSpent })); // Replace, no merge/add
+      // Add to totalTime
+      screenTime.totalTime += totalTime;
+      screenTime.totalTime = Math.min(screenTime.totalTime, 86400); // Cap at 24h
+
+      // Merge tabs: Add timeSpent for existing URLs, append new ones
+      const tabMap = new Map(screenTime.tabs.map(tab => [tab.url, tab]));
+      validTabs.forEach(tab => {
+        if (tabMap.has(tab.url)) {
+          tabMap.get(tab.url).timeSpent += tab.timeSpent;
+        } else {
+          tabMap.set(tab.url, { url: tab.url, timeSpent: tab.timeSpent });
+        }
+      });
+      screenTime.tabs = Array.from(tabMap.values()).filter(tab => tab.timeSpent > 0); // Optional: Remove zero-time tabs
       screenTime.screenTimeId = screenTimeId || screenTime.screenTimeId;
     } else {
       // Create new record
@@ -80,7 +91,7 @@ router.post('/', authMiddleware, async (req, res) => {
     }
 
     await screenTime.save();
-    logger.info('Screen time replaced/updated', {
+    logger.info('Screen time updated additively', {
       userId,
       date: screenTime.date.toISOString(),
       totalTime: screenTime.totalTime,
