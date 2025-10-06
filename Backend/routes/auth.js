@@ -85,22 +85,6 @@ router.post('/login', async (req, res) => {
   }
 });
 
-// POST /auth/logout (optional, for server-side cleanup if needed)
-router.post('/logout', authMiddleware, async (req, res) => {
-  try {
-    const user = await User.findOne({ userId: req.user.userId });
-    if (user) {
-      user.spotifyToken = null; // Clear tokens on server
-      await user.save();
-    }
-    logger.info('User logged out', { userId: req.user.userId });
-    res.status(200).json({ message: 'Logged out successfully' });
-  } catch (error) {
-    logger.error('Error during logout:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-});
-
 // GET /auth/profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {

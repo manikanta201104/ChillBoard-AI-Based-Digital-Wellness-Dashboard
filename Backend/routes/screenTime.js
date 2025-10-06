@@ -30,12 +30,11 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Invalid date format' });
     }
 
-    // Validate totalTime and cap at 24 hours
+    // Validate totalTime
     if (typeof totalTime !== 'number' || totalTime < 0) {
       logger.warn('Invalid totalTime', { totalTime });
       return res.status(400).json({ message: 'Invalid totalTime' });
     }
-    totalTime = Math.min(totalTime, 86400);
 
     // Validate tabs
     if (!Array.isArray(tabs)) {
@@ -43,6 +42,7 @@ router.post('/', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Tabs must be an array' });
     }
 
+    // Relaxed validation to include tabs with low timeSpent
     const validTabs = tabs.filter((tab) => {
       if (!tab.url || typeof tab.url !== 'string' || typeof tab.timeSpent !== 'number') {
         logger.warn('Invalid tab data skipped:', { tab });
@@ -60,7 +60,6 @@ router.post('/', authMiddleware, async (req, res) => {
       });
       totalTime = tabsTotalTime; // Trust tab times if higher
     }
-    totalTime = Math.min(totalTime, 86400); // Re-cap after adjustment
 
     if (!screenTimeId) {
       screenTimeId = `st_${Date.now()}_${userId}`;
@@ -70,12 +69,12 @@ router.post('/', authMiddleware, async (req, res) => {
     let screenTime = await ScreenTime.findOne({ userId, date });
     if (screenTime) {
       // Update existing record
-      screenTime.totalTime = totalTime;
+      screenTime.totalTime += totalTime;
       const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
       validTabs.forEach((tab) => {
         existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
       });
-      screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent: Math.min(timeSpent, 86400) }));
+      screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
       screenTime.screenTimeId = screenTime.screenTimeId || screenTimeId;
     } else {
       // Create new record
@@ -84,7 +83,7 @@ router.post('/', authMiddleware, async (req, res) => {
         userId,
         date,
         totalTime,
-        tabs: validTabs.map(tab => ({ url: tab.url, timeSpent: Math.min(tab.timeSpent, 86400) })),
+        tabs: validTabs,
       });
     }
 
@@ -97,6 +96,29 @@ router.post('/', authMiddleware, async (req, res) => {
     });
     res.status(201).json({ message: 'Screen time saved or updated', screenTime });
   } catch (error) {
+    if (error.code === 11000) {
+      try {
+        const screenTime = await ScreenTime.findOne({ userId, date });
+        if (screenTime) {
+          screenTime.totalTime += totalTime;
+          const existingTabsMap = new Map(screenTime.tabs.map((tab) => [tab.url, tab.timeSpent]));
+          validTabs.forEach((tab) => {
+            existingTabsMap.set(tab.url, (existingTabsMap.get(tab.url) || 0) + tab.timeSpent);
+          });
+          screenTime.tabs = Array.from(existingTabsMap, ([url, timeSpent]) => ({ url, timeSpent }));
+          await screenTime.save();
+          logger.info('Merged duplicate screen time', {
+            userId,
+            date: screenTime.date.toISOString(),
+            totalTime: screenTime.totalTime,
+          });
+          return res.status(201).json({ message: 'Screen time merged', screenTime });
+        }
+      } catch (mergeError) {
+        logger.error('Error merging duplicate screen time:', mergeError);
+        return res.status(500).json({ message: 'Server error during merge' });
+      }
+    }
     logger.error('Error saving screen time:', error);
     res.status(500).json({ message: 'Server error', error: error.message });
   }
@@ -111,8 +133,6 @@ router.get('/', authMiddleware, async (req, res) => {
     const formattedData = screenTimeData.map((data) => {
       const obj = data.toObject();
       obj.date = data.date.toISOString().split('T')[0];
-      obj.totalTime = Math.min(obj.totalTime, 86400);
-      obj.tabs.forEach(tab => tab.timeSpent = Math.min(tab.timeSpent, 86400));
       return obj;
     });
     res.status(200).json(formattedData);
