@@ -16,6 +16,21 @@ document.addEventListener('DOMContentLoaded', () => {
   let statsUpdateInterval = null;
   let isPopupClosing = false;
 
+  // Updated: Function to get YYYY-MM-DD in IST (Asia/Kolkata)
+  function getISTDateString(date = new Date()) {
+    const formatter = new Intl.DateTimeFormat('sv-SE', { 
+      timeZone: 'Asia/Kolkata',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const parts = formatter.formatToParts(date);
+    const year = parts.find(p => p.type === 'year').value;
+    const month = parts.find(p => p.type === 'month').value;
+    const day = parts.find(p => p.type === 'day').value;
+    return `${year}-${month}-${day}`;
+  }
+
   function jwtDecode(token) {
     try {
       const base64Url = token.split('.')[1];
@@ -47,8 +62,12 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
           }
         }
+        // NEW: background should update isAuthenticated
+        await sendMessageToBackgroundWithRetry({ action: 'authUpdated' }, 3, 500);
+        // Sync any pending local/queued data first before showing stats or fetching
+        await sendMessageToBackgroundWithRetry({ action: 'syncData' }, 5, 1000);
         await showStats();
-        const currentDate = new Date().toISOString().split('T')[0];
+        const currentDate = getISTDateString(); // Updated: Use IST date
         await fetchScreenTimeWithRetry(result.jwt, currentDate);
       } else {
         showLogin();
@@ -229,6 +248,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
       const data = await response.json();
       await setStorageData({ jwt: data.token, refreshToken: refreshToken });
+      // NEW: Inform background so it can resume tracking if paused
+      await sendMessageToBackgroundWithRetry({ action: 'authUpdated' }, 3, 500);
       return data.token;
     } catch (error) {
       console.error('Error refreshing JWT:', error.message);
@@ -240,174 +261,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showLogin();
       return null;
     }
-  }
-
-  function combineTabUsageByUrl(tabUsageArray) {
-    if (!Array.isArray(tabUsageArray)) return [];
-    const urlMap = new Map();
-    tabUsageArray.forEach(tab => {
-      if (!tab || !tab.url) return;
-      const url = tab.url.toString();
-      if (urlMap.has(url)) {
-        urlMap.get(url).timeSpent += tab.timeSpent || 0;
-      } else {
-        urlMap.set(url, { tabId: tab.tabId, url, timeSpent: tab.timeSpent || 0 });
-      }
-    });
-    return Array.from(urlMap.values());
-  }
-
-  async function updateStatsDisplay() {
-    if (isPopupClosing) return;
-    
-    try {
-      const pingResponse = await sendMessageToBackgroundWithRetry({ action: 'ping' }, 5, 1000);
-      if (!pingResponse || pingResponse.status !== 'success') {
-        console.warn('Background script not ready, using local data');
-        await useLocalData();
-        return;
-      }
-
-      const syncResponse = await sendMessageToBackgroundWithRetry({ action: 'syncData' }, 5, 1000);
-      if (!syncResponse) console.warn('Failed to sync data with background script');
-      
-      await sleep(500);
-      
-      const response = await sendMessageToBackgroundWithRetry({ action: 'getCurrentStats' }, 5, 1000);
-      let totalTime = 0, tabUsage = [];
-      
-      if (response && response.status === 'success') {
-        totalTime = response.totalTime || 0;
-        tabUsage = response.tabUsage || [];
-      } else {
-        await useLocalData();
-        return;
-      }
-
-      tabUsage = combineTabUsageByUrl(tabUsage);
-
-      if (totalTimeSpan) {
-        const formattedTime = isLoading ? 'Loading...' : formatTime(totalTime);
-        if (totalTimeSpan.textContent !== formattedTime) {
-          totalTimeSpan.style.transition = 'all 0.3s ease';
-          totalTimeSpan.textContent = formattedTime;
-        }
-      }
-      
-      if (tabCountSpan) {
-        const count = tabUsage.length.toString();
-        if (tabCountSpan.textContent !== count) {
-          tabCountSpan.style.transition = 'all 0.3s ease';
-          tabCountSpan.textContent = count;
-        }
-      }
-
-      if (tabUsageList) {
-        tabUsageList.innerHTML = '';
-        const sortedTabs = [...tabUsage].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0));
-        sortedTabs.forEach((entry, index) => {
-          if (!entry || !entry.url || entry.timeSpent <= 0) return;
-          const li = document.createElement('li');
-          li.className = 'tab-entry';
-          li.style.animationDelay = `${index * 50}ms`;
-          li.style.animation = 'slideIn 0.4s ease-out forwards';
-          li.style.opacity = '0';
-          
-          const urlSpan = document.createElement('span');
-          urlSpan.className = 'tab-url';
-          urlSpan.textContent = entry.url;
-          urlSpan.title = entry.url;
-          
-          const timeSpan = document.createElement('span');
-          timeSpan.className = 'tab-time';
-          timeSpan.textContent = formatTime(entry.timeSpent);
-          
-          li.appendChild(urlSpan);
-          li.appendChild(timeSpan);
-          tabUsageList.appendChild(li);
-          
-          // Trigger animation
-          setTimeout(() => {
-            li.style.opacity = '1';
-          }, 50 + index * 50);
-        });
-      }
-    } catch (error) {
-      console.error('Error updating stats display:', error.message);
-      await useLocalData();
-      if (loginError) {
-        loginError.textContent = 'Error loading stats. Using cached data.';
-        loginError.style.background = 'rgba(251, 191, 36, 0.1)';
-        loginError.style.borderColor = 'rgba(251, 191, 36, 0.3)';
-        loginError.style.color = '#d97706';
-        setTimeout(() => { 
-          if (loginError) {
-            loginError.textContent = '';
-            loginError.style.background = '';
-            loginError.style.borderColor = '';
-            loginError.style.color = '';
-          }
-        }, 3000);
-      }
-    }
-  }
-
-  async function useLocalData() {
-    const localData = await getStorageData(['totalTime', 'tabUsage', 'lastSyncedTotalTime', 'lastSyncedTabUsage']);
-    const totalTime = localData.totalTime || localData.lastSyncedTotalTime || 0;
-    const tabUsage = localData.tabUsage || localData.lastSyncedTabUsage || [];
-
-    if (totalTimeSpan) {
-      totalTimeSpan.style.transition = 'all 0.3s ease';
-      totalTimeSpan.textContent = formatTime(totalTime);
-    }
-    if (tabCountSpan) {
-      tabCountSpan.style.transition = 'all 0.3s ease';
-      tabCountSpan.textContent = tabUsage.length.toString();
-    }
-
-    if (tabUsageList) {
-      tabUsageList.innerHTML = '';
-      const sortedTabs = [...tabUsage].sort((a, b) => (b.timeSpent || 0) - (a.timeSpent || 0));
-      sortedTabs.forEach((entry, index) => {
-        if (!entry || !entry.url || entry.timeSpent <= 0) return;
-        const li = document.createElement('li');
-        li.className = 'tab-entry';
-        li.style.animationDelay = `${index * 50}ms`;
-        li.style.animation = 'slideIn 0.4s ease-out forwards';
-        li.style.opacity = '0';
-        
-        const urlSpan = document.createElement('span');
-        urlSpan.className = 'tab-url';
-        urlSpan.textContent = entry.url;
-        urlSpan.title = entry.url;
-        
-        const timeSpan = document.createElement('span');
-        timeSpan.className = 'tab-time';
-        timeSpan.textContent = formatTime(entry.timeSpent);
-        
-        li.appendChild(urlSpan);
-        li.appendChild(timeSpan);
-        tabUsageList.appendChild(li);
-        
-        // Trigger animation
-        setTimeout(() => {
-          li.style.opacity = '1';
-        }, 50 + index * 50);
-      });
-    }
-  }
-
-  function formatTime(seconds) {
-    if (!seconds || seconds < 0) return '0s';
-    const totalSeconds = Math.floor(seconds);
-    if (totalSeconds < 60) return `${totalSeconds}s`;
-    const minutes = Math.floor(totalSeconds / 60);
-    const remainingSeconds = totalSeconds % 60;
-    if (minutes < 60) return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    return remainingMinutes > 0 ? `${hours}h ${remainingMinutes}m` : `${hours}h`;
   }
 
   async function handleLogin() {
@@ -452,6 +305,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!decoded) throw new Error('Invalid token received');
 
       await setStorageData({ jwt: data.token, refreshToken: data.refreshToken || null });
+      // NEW: Notify background that auth state changed
+      await sendMessageToBackgroundWithRetry({ action: 'authUpdated' }, 3, 500);
       
       // Add success animation
       if (loginBtn) {
@@ -460,8 +315,11 @@ document.addEventListener('DOMContentLoaded', () => {
         await sleep(500);
       }
       
+      // Sync pending data immediately after login
+      await sendMessageToBackgroundWithRetry({ action: 'syncData' }, 5, 1000);
+      
       await showStats();
-      const currentDate = new Date().toISOString().split('T')[0];
+      const currentDate = getISTDateString(); // Updated: Use IST date
       await fetchScreenTimeWithRetry(data.token, currentDate);
     } catch (error) {
       console.error('Login error:', error.message);
@@ -488,6 +346,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     try {
+      // FIX: Call background to clear all tracking data
+      await sendMessageToBackgroundWithRetry({ action: 'logout' }, 5, 1000);
       await clearStorageData(['jwt', 'refreshToken', 'lastServerSync', 'tabStartTime', 'currentTabId', 'currentTabUrl', 'isTracking']);
       
       // Add logout animation

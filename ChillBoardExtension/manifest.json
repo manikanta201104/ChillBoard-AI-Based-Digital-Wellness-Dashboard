@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "ChillBoard Extension",
-  "version": "1.0",
+  "version": "1.5",
   "description": "Tracks screen time for ChillBoard wellness dashboard",
-  "permissions": ["storage", "tabs", "windows", "alarms", "idle"],
+  "permissions": ["storage", "tabs", "windows", "alarms", "idle", "webNavigation"],
   "host_permissions": [
     "http://localhost:5000/*",
     "http://localhost:3000/*",
