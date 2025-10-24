@@ -200,7 +200,8 @@ export const adminListChallenges = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const res = await api.get('/admin/challenges', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
-  return res.data; // { data, page, limit, total, totalPages }
+  // Back-compat: unwrap paginated data if present
+  return res.data?.data ?? res.data;
 };
 
 export const adminCreateChallenge = async (payload) => {
@@ -229,7 +230,8 @@ export const adminListContacts = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const res = await api.get('/admin/contacts', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
-  return res.data; // { data, page, limit, total, totalPages }
+  // Back-compat: unwrap paginated data if present
+  return res.data?.data ?? res.data;
 };
 
 export const adminResolveContact = async (id, resolved) => {
@@ -244,7 +246,8 @@ export const adminListUsers = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const res = await api.get('/admin/users', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
-  return res.data; // { data, page, limit, total, totalPages }
+  // Back-compat: unwrap paginated data if present
+  return res.data?.data ?? res.data;
 };
 
 export const adminUpdateUser = async (userId, payload) => {
@@ -283,7 +286,8 @@ export const adminListReviews = async (status = 'pending', page = 1, limit = 10)
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
   const res = await api.get(`/admin/reviews`, { params: { status, page, limit }, headers: { Authorization: `Bearer ${token}` } });
-  return res.data; // { data, page, limit, total, totalPages }
+  // Back-compat: unwrap paginated data if present
+  return res.data?.data ?? res.data;
 };
 
 // Admin: approve review
