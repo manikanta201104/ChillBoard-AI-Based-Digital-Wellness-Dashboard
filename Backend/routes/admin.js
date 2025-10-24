@@ -16,9 +16,9 @@ router.get('/challenges', async (req, res) => {
   try {
     const list = await Challenge.find({}).sort({ createdAt: -1 });
     // Return all challenges for admin management
-    res.status(200).json(list);
+    return res.status(200).json(list);
   } catch (e) {
-    res.status(500).json({ message: 'Failed to fetch challenges' });
+    return res.status(500).json({ message: 'Failed to fetch challenges' });
   }
 });
 

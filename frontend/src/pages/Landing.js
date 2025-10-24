@@ -1,14 +1,51 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import AuthForm from '../components/AuthForm';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import { getApprovedReviews, submitReview } from '../utils/api';
 
 const Landing = () => {
   const [showForm, setShowForm] = useState(null);
+  const [reviews, setReviews] = useState([]);
+  const [reviewForm, setReviewForm] = useState({ name: '', rating: 5, text: '' });
+  const [submitting, setSubmitting] = useState(false);
+  const isLoggedIn = !!localStorage.getItem('jwt');
 
   const handleAuthSuccess = () => {
     setShowForm(null);
     window.location.href = '/dashboard'; // Redirect to dashboard after success
+  };
+
+  // Load approved reviews on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await getApprovedReviews();
+        setReviews(list || []);
+      } catch (e) {
+        // silently ignore on landing if fetch fails
+      }
+    })();
+  }, []);
+
+  // Submit a review (goes to pending until admin approves)
+  const handleSubmitReview = async (e) => {
+    e.preventDefault();
+    if (!isLoggedIn) return;
+    setSubmitting(true);
+    try {
+      await submitReview({
+        name: reviewForm.name,
+        rating: Number(reviewForm.rating),
+        text: reviewForm.text,
+      });
+      setReviewForm({ name: '', rating: 5, text: '' });
+      alert('Thanks! Your review is pending approval.');
+    } catch (e) {
+      alert('Failed to submit review.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -131,6 +168,74 @@ const Landing = () => {
                   </svg>
                   <span>Download ChillBoard Extension</span>
                 </a>
+              </div>
+
+              {/* Reviews Section */}
+              <div className="bg-white rounded-xl p-6 border border-slate-200 shadow-sm">
+                <div className="flex items-center space-x-3 mb-4">
+                  <div className="w-10 h-10 bg-amber-100 rounded-lg flex items-center justify-center">
+                    <svg className="w-6 h-6 text-amber-600" fill="currentColor" viewBox="0 0 24 24">
+                      <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+                    </svg>
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-semibold text-slate-700">What users say</h3>
+                    <p className="text-sm text-slate-500">Approved reviews from the community</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  {reviews.length === 0 && (
+                    <p className="text-sm text-slate-500">No reviews yet. Be the first to share your thoughts!</p>
+                  )}
+                  {reviews.map((r) => (
+                    <div key={r._id} className="p-4 border border-slate-200 rounded-lg">
+                      <div className="flex items-center justify-between">
+                        <div className="font-medium text-slate-700">{r.name || 'Anonymous'}</div>
+                        <div className="text-amber-600">{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</div>
+                      </div>
+                      <p className="text-slate-600 text-sm mt-2">{r.text}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Submit review form for logged-in users */}
+                {isLoggedIn && (
+                  <form onSubmit={handleSubmitReview} className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <input
+                        type="text"
+                        placeholder="Your name (optional)"
+                        value={reviewForm.name}
+                        onChange={(e) => setReviewForm({ ...reviewForm, name: e.target.value })}
+                        className="border border-slate-300 rounded-lg p-3"
+                      />
+                      <select
+                        value={reviewForm.rating}
+                        onChange={(e) => setReviewForm({ ...reviewForm, rating: e.target.value })}
+                        className="border border-slate-300 rounded-lg p-3"
+                      >
+                        {[5,4,3,2,1].map(n => <option key={n} value={n}>{n} Stars</option>)}
+                      </select>
+                      <button
+                        type="submit"
+                        disabled={submitting}
+                        className="bg-slate-600 text-white rounded-lg px-4 py-3 disabled:bg-slate-400"
+                      >
+                        {submitting ? 'Submitting...' : 'Submit Review'}
+                      </button>
+                    </div>
+                    <textarea
+                      placeholder="Share your experience..."
+                      value={reviewForm.text}
+                      onChange={(e) => setReviewForm({ ...reviewForm, text: e.target.value })}
+                      rows={3}
+                      className="w-full border border-slate-300 rounded-lg p-3"
+                      required
+                    />
+                    <p className="text-xs text-slate-500">Your review will be visible after admin approval.</p>
+                  </form>
+                )}
               </div>
             </div>
 
