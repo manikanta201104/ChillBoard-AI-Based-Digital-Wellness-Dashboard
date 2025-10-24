@@ -177,6 +177,80 @@ export const saveSettings = async (settingsData) => {
   return response.data;
 };
 
+export const getUserSettings = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.get('/auth/user/settings', {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+};
+
+export const patchUserSettings = async (settingsData) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const response = await api.patch('/auth/user/settings', settingsData, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return response.data;
+};
+
+export const adminListChallenges = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.get('/admin/challenges', { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminCreateChallenge = async (payload) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.post('/admin/challenges', payload, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminUpdateChallenge = async (challengeId, payload) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.patch(`/admin/challenges/${challengeId}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminDeleteChallenge = async (challengeId) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.delete(`/admin/challenges/${challengeId}`, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminListContacts = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.get('/admin/contacts', { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminResolveContact = async (id, resolved) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.patch(`/admin/contacts/${id}`, { resolved }, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminListUsers = async () => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+export const adminUpdateUser = async (userId, payload) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.patch(`/admin/users/${userId}`, payload, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
 export const sendContactMessage = async (contactData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');

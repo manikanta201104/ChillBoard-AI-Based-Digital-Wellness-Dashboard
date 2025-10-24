@@ -9,6 +9,7 @@ import moodRoutes from './routes/mood.js';
 import recommendationsRoutes from './routes/recommendations.js';
 import spotifyRoutes from './routes/spotify.js';
 import challengesRoutes from './routes/challenges.js';
+import adminRoutes from './routes/admin.js';
 import contactRoutes from './routes/contact.js';
 
 dotenv.config ();
@@ -82,6 +83,7 @@ app.use ('/ping', (req, res) => {
 app.use ('/spotify', spotifyRoutes);
 app.use ('/challenges', challengesRoutes);
 app.use ('/contact', contactRoutes);
+app.use ('/admin', adminRoutes);
 
 // MongoDB Connection
 mongoose

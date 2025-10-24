@@ -34,6 +34,17 @@ const userSchema = new mongoose.Schema(
       type: Object,
       default: {},
     },
+    // NEW: role-based access for admin features
+    role: {
+      type: String,
+      enum: ['user', 'admin'],
+      default: 'user',
+    },
+    // NEW: allow admin to deactivate a user account
+    active: {
+      type: Boolean,
+      default: true,
+    },
   },
   { timestamps: true }
 );

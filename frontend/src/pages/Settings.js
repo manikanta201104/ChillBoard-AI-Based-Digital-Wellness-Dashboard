@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { getUser, saveSettings } from "../utils/api";
+import { getUserSettings, patchUserSettings, getUser } from "../utils/api";
 import { requestNotificationPermission, scheduleNotifications } from "../utils/notifications";
+import usePermission from "../hooks/usePermission";
 
 const Settings = () => {
   const [webcamEnabled, setWebcamEnabled] = useState(false);
@@ -8,24 +9,33 @@ const Settings = () => {
   const [showNameOnLeaderboard, setShowNameOnLeaderboard] = useState(true);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [cameraError, setCameraError] = useState('');
+
+  // Permissions
+  const cameraPerm = usePermission('camera');
+  const notifPerm = usePermission('notifications');
 
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const user = await getUser();
-        const prefs = user.preferences || {};
-        setWebcamEnabled(prefs.webcamEnabled || false);
+        // Fetch minimal profile to ensure session, then specific user preferences
+        await getUser();
+        const prefs = await getUserSettings();
+        setWebcamEnabled(!!prefs.webcamEnabled);
         setNotificationFrequency(prefs.notifyEvery || 'Off');
-        setShowNameOnLeaderboard(prefs.showOnLeaderboard !== false); // Default to true
+        setShowNameOnLeaderboard(prefs.showOnLeaderboard !== false);
       } catch (error) {
         console.error('Failed to fetch settings:', error);
         setMessage('Failed to load settings');
         setTimeout(() => setMessage(''), 3000);
+      } finally {
+        setInitialLoading(false);
       }
     };
     fetchSettings();
 
-    // Request notification permission on component mount
+    // Proactively request notification permission in background (non-blocking)
     requestNotificationPermission();
   }, []);
 
@@ -34,10 +44,21 @@ const Settings = () => {
     scheduleNotifications(notificationFrequency);
   }, [notificationFrequency]);
 
+  // Persist settings helper with optimistic UI
+  const persistSettings = async (nextPrefs) => {
+    try {
+      await patchUserSettings(nextPrefs);
+    } catch (e) {
+      console.error('Persist error:', e);
+      setMessage('Failed to save settings');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
   const handleSave = async () => {
     setLoading(true);
     try {
-      await saveSettings({
+      await patchUserSettings({
         webcamEnabled,
         notifyEvery: notificationFrequency,
         showOnLeaderboard: showNameOnLeaderboard,
@@ -53,9 +74,35 @@ const Settings = () => {
     }
   };
 
+  // Handle webcam toggle: request permission if enabling
+  const onToggleWebcam = async () => {
+    const next = !webcamEnabled;
+    setWebcamEnabled(next);
+    if (next) {
+      setCameraError('');
+      const granted = await cameraPerm.request();
+      if (!granted && cameraPerm.state !== 'granted') {
+        setWebcamEnabled(false);
+        setCameraError('Camera access denied — enable it in your browser settings');
+        return;
+      }
+    }
+    persistSettings({ webcamEnabled: next, notifyEvery: notificationFrequency, showOnLeaderboard });
+  };
+
+  // Handle notification frequency change
+  const onChangeFrequency = async (value) => {
+    setNotificationFrequency(value);
+    if (value !== 'Off') {
+      await requestNotificationPermission();
+    }
+    persistSettings({ webcamEnabled, notifyEvery: value, showOnLeaderboard });
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <div className="max-w-4xl mx-auto">
+
         {/* Header Section */}
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold text-slate-700 mb-4">Settings</h1>
@@ -67,7 +114,10 @@ const Settings = () => {
         {/* Settings Card */}
         <div className="bg-white rounded-lg shadow-sm border border-slate-200">
           <div className="p-8 space-y-8">
-            
+            {initialLoading && (
+              <div className="p-4 rounded-lg bg-slate-50 border border-slate-200 text-slate-600">Loading settings…</div>
+            )}
+
             {/* Webcam Settings */}
             <div className="space-y-4">
               <div className="flex items-center space-x-3 mb-4">
@@ -78,19 +128,20 @@ const Settings = () => {
                 </div>
                 <h2 className="text-xl font-semibold text-slate-700">Webcam Settings</h2>
               </div>
-              
+
               <div className="bg-slate-50 rounded-lg p-6 border border-slate-200">
                 <label className="flex items-start space-x-4 cursor-pointer">
                   <div className="relative flex-shrink-0 mt-1">
                     <input
                       type="checkbox"
                       checked={webcamEnabled}
-                      onChange={() => setWebcamEnabled(!webcamEnabled)}
+                      onChange={onToggleWebcam}
                       className="sr-only"
                     />
+
                     <div className={`w-6 h-6 rounded-md border-2 transition-all duration-200 ${
-                      webcamEnabled 
-                        ? 'bg-green-500 border-green-500' 
+                      webcamEnabled
+                        ? 'bg-green-500 border-green-500'
                         : 'bg-white border-slate-300 hover:border-slate-400'
                     }`}>
                       {webcamEnabled && (
@@ -105,6 +156,13 @@ const Settings = () => {
                     <p className="text-sm text-slate-500 mt-1">
                       Allow the app to access your camera for emotion-based insights and recommendations
                     </p>
+                    {/* Camera permission state */}
+                    {cameraPerm.state === 'denied' && (
+                      <p className="text-sm text-red-600 mt-2">Camera access denied — enable it in your browser settings</p>
+                    )}
+                    {cameraError && (
+                      <p className="text-sm text-red-600 mt-2">{cameraError}</p>
+                    )}
                   </div>
                 </label>
               </div>
@@ -120,13 +178,13 @@ const Settings = () => {
                 </div>
                 <h2 className="text-xl font-semibold text-slate-700">Notification Settings</h2>
               </div>
-              
+
               <div className="bg-slate-50 rounded-lg p-6 border border-slate-200">
                 <label className="block">
                   <span className="font-medium text-slate-700 mb-2 block">Reminder Frequency</span>
                   <select
                     value={notificationFrequency}
-                    onChange={(e) => setNotificationFrequency(e.target.value)}
+                    onChange={(e) => onChangeFrequency(e.target.value)}
                     className="w-full p-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-500 focus:border-slate-500 bg-white text-slate-700 transition-colors duration-200"
                   >
                     <option value="Off">Off</option>
@@ -136,6 +194,10 @@ const Settings = () => {
                   <p className="text-sm text-slate-500 mt-2">
                     Get gentle reminders to take breaks from your screen
                   </p>
+                  {/* Notification permission hint */}
+                  {notificationFrequency !== 'Off' && notifPerm.state === 'denied' && (
+                    <p className="text-sm text-red-600 mt-2">Notifications blocked by browser — enable in site settings</p>
+                  )}
                 </label>
               </div>
             </div>
@@ -150,7 +212,7 @@ const Settings = () => {
                 </div>
                 <h2 className="text-xl font-semibold text-slate-700">Challenge Settings</h2>
               </div>
-              
+
               <div className="bg-slate-50 rounded-lg p-6 border border-slate-200">
                 <label className="flex items-start space-x-4 cursor-pointer">
                   <div className="relative flex-shrink-0 mt-1">
@@ -160,9 +222,10 @@ const Settings = () => {
                       onChange={() => setShowNameOnLeaderboard(!showNameOnLeaderboard)}
                       className="sr-only"
                     />
+
                     <div className={`w-6 h-6 rounded-md border-2 transition-all duration-200 ${
-                      showNameOnLeaderboard 
-                        ? 'bg-green-500 border-green-500' 
+                      showNameOnLeaderboard
+                        ? 'bg-green-500 border-green-500'
                         : 'bg-white border-slate-300 hover:border-slate-400'
                     }`}>
                       {showNameOnLeaderboard && (
@@ -175,8 +238,8 @@ const Settings = () => {
                   <div>
                     <span className="font-medium text-slate-700">Show My Name on Leaderboard</span>
                     <p className="text-sm text-slate-500 mt-1">
-                      {showNameOnLeaderboard 
-                        ? "Your name will be visible in challenge rankings" 
+                      {showNameOnLeaderboard
+                        ? "Your name will be visible in challenge rankings"
                         : "Switch off for anonymous participation in challenges"
                       }
                     </p>
@@ -211,8 +274,8 @@ const Settings = () => {
             {/* Message Display */}
             {message && (
               <div className={`p-4 rounded-lg border ${
-                message.includes('successfully') 
-                  ? 'bg-green-50 border-green-200 text-green-700' 
+                message.includes('successfully')
+                  ? 'bg-green-50 border-green-200 text-green-700'
                   : 'bg-red-50 border-red-200 text-red-700'
               }`}>
                 <div className="flex items-center space-x-2">

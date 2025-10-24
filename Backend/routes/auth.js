@@ -88,7 +88,8 @@ router.post('/login', async (req, res) => {
 // GET /auth/profile
 router.get('/profile', authMiddleware, async (req, res) => {
   try {
-    const user = await User.findOne({ userId: req.user.userId }).select('username email spotifyToken preferences');
+    const user = await User.findOne({ userId: req.user.userId }).select('username email spotifyToken preferences role active');
+
     if (!user) {
       logger.warn('User not found', { userId: req.user.userId });
       return res.status(404).json({ message: 'User not found' });
@@ -99,7 +100,9 @@ router.get('/profile', authMiddleware, async (req, res) => {
       username: user.username, 
       email: user.email, 
       spotifyToken: user.spotifyToken, 
-      preferences: user.preferences 
+      preferences: user.preferences,
+      role: user.role,
+      active: user.active
     });
   } catch (error) {
     logger.error('Error fetching profile:', error);
@@ -156,6 +159,34 @@ router.post('/settings', authMiddleware, async (req, res) => {
     res.status(200).json({ message: 'Settings saved successfully' });
   } catch (error) {
     logger.error('Error saving settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// GET /user/settings - fetch only preferences
+router.get('/user/settings', authMiddleware, async (req, res) => {
+  try {
+    const user = await User.findOne({ userId: req.user.userId }).select('preferences');
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    res.status(200).json(user.preferences || {});
+  } catch (error) {
+    logger.error('Error fetching user settings:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// PATCH /user/settings - update preferences
+router.patch('/user/settings', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { webcamEnabled, notifyEvery, showOnLeaderboard } = req.body;
+    const user = await User.findOne({ userId });
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    user.preferences = { ...(user.preferences || {}), webcamEnabled, notifyEvery, showOnLeaderboard };
+    await user.save();
+    res.status(200).json({ message: 'Settings updated', preferences: user.preferences });
+  } catch (error) {
+    logger.error('Error updating settings:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 });

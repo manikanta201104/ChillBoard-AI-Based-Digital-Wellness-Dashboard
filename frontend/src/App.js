@@ -6,6 +6,7 @@ import Profile from './pages/Profile';
 import Settings from './pages/Settings';
 import About from './pages/About';
 import Navbar from './components/Navbar';
+import AdminDashboard from './pages/AdminDashboard.jsx';
 import Privacy from './pages/Privacy';
 
 const ProtectedLayout = () => {
@@ -32,6 +33,7 @@ function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
           <Route path="/privacy" element={<Privacy />} />
+          <Route path="/admin" element={<AdminDashboard />} />
         </Route>
       </Routes>
     </Router>

@@ -24,3 +24,24 @@ export const authMiddleware = (req, res, next) => {
     return res.status(401).json({ message: 'Invalid or expired token' });
   }
 };
+
+// NEW: verifyAdmin middleware for admin-only APIs
+export const verifyAdmin = async (req, res, next) => {
+  try {
+    const { default: User } = await import('../models/user.js');
+    const user = await User.findOne({ userId: req.user.userId }).select('role active');
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (!user.active) {
+      return res.status(403).json({ message: 'User account is deactivated' });
+    }
+    if (user.role !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    next();
+  } catch (error) {
+    logger.error('verifyAdmin error', { error: error.message });
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
