@@ -93,6 +93,38 @@ router.patch('/contacts/:id', async (req, res) => {
   }
 });
 
+// Reviews moderation
+// NOTE: All routes in this file are protected by `router.use(authMiddleware, verifyAdmin)` above,
+// so only authenticated admins can access these endpoints. This prevents non-admin users from
+// reading or moderating reviews.
+
+// GET /admin/reviews?status=pending
+// - Lists reviews filtered by the optional `status` query param.
+// - Defaults to 'pending' if not provided.
+// - Returns newest first.
+router.get('/reviews', async (req, res) => {
+  try {
+    const status = req.query.status || 'pending'; // read filter from query string
+    const list = await Review.find({ status }).sort({ createdAt: -1 }); // query Mongo by status
+    return res.status(200).json(list); // respond with JSON array
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to fetch reviews' }); // standardized error
+  }
+});
+
+// PATCH /admin/reviews/:id/approve
+// - Approves a review by id and returns the updated document.
+router.patch('/reviews/:id/approve', async (req, res) => {
+  try {
+    const { id } = req.params; // path param
+    const doc = await Review.findByIdAndUpdate(id, { status: 'approved' }, { new: true });
+    if (!doc) return res.status(404).json({ message: 'Review not found' }); // id not present
+    return res.status(200).json(doc); // success: return updated review
+  } catch (e) {
+    return res.status(500).json({ message: 'Failed to approve review' }); // standardized error
+  }
+});
+
 // Users
 router.get('/users', async (req, res) => {
   try {
