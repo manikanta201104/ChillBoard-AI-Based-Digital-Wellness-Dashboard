@@ -87,7 +87,12 @@ const Settings = () => {
         return;
       }
     }
-    persistSettings({ webcamEnabled: next, notifyEvery: notificationFrequency, showOnLeaderboard });
+    persistSettings({
+  webcamEnabled: next,
+  notifyEvery: notificationFrequency,
+  showOnLeaderboard: showNameOnLeaderboard,
+});
+
   };
 
   // Handle notification frequency change
@@ -96,7 +101,12 @@ const Settings = () => {
     if (value !== 'Off') {
       await requestNotificationPermission();
     }
-    persistSettings({ webcamEnabled, notifyEvery: value, showOnLeaderboard });
+    persistSettings({
+  webcamEnabled,
+  notifyEvery: value,
+  showOnLeaderboard: showNameOnLeaderboard,
+});
+
   };
 
   return (
