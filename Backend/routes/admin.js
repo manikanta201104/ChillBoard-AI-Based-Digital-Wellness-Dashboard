@@ -14,9 +14,16 @@ router.use(authMiddleware, verifyAdmin);
 // Challenges
 router.get('/challenges', async (req, res) => {
   try {
-    const list = await Challenge.find({}).sort({ createdAt: -1 });
-    // Return all challenges for admin management
-    return res.status(200).json(list);
+    // Pagination params
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
+    const skip = (page - 1) * limit;
+    // Fetch page
+    const [total, list] = await Promise.all([
+      Challenge.countDocuments({}),
+      Challenge.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit)
+    ]);
+    return res.status(200).json({ data: list, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (e) {
     return res.status(500).json({ message: 'Failed to fetch challenges' });
   }
@@ -74,8 +81,14 @@ router.delete('/challenges/:challengeId', async (req, res) => {
 // Contacts
 router.get('/contacts', async (req, res) => {
   try {
-    const list = await ContactMessage.find({}).sort({ createdAt: -1 });
-    res.status(200).json(list);
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
+    const skip = (page - 1) * limit;
+    const [total, list] = await Promise.all([
+      ContactMessage.countDocuments({}),
+      ContactMessage.find({}).sort({ createdAt: -1 }).skip(skip).limit(limit)
+    ]);
+    res.status(200).json({ data: list, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (e) {
     res.status(500).json({ message: 'Failed to fetch contacts' });
   }
@@ -104,9 +117,16 @@ router.patch('/contacts/:id', async (req, res) => {
 // - Returns newest first.
 router.get('/reviews', async (req, res) => {
   try {
-    const status = req.query.status || 'pending'; // read filter from query string
-    const list = await Review.find({ status }).sort({ createdAt: -1 }); // query Mongo by status
-    return res.status(200).json(list); // respond with JSON array
+    const status = req.query.status || 'pending'; // filter by status
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
+    const skip = (page - 1) * limit;
+    const query = { status };
+    const [total, list] = await Promise.all([
+      Review.countDocuments(query),
+      Review.find(query).sort({ createdAt: -1 }).skip(skip).limit(limit)
+    ]);
+    return res.status(200).json({ data: list, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (e) {
     return res.status(500).json({ message: 'Failed to fetch reviews' }); // standardized error
   }
@@ -128,16 +148,24 @@ router.patch('/reviews/:id/approve', async (req, res) => {
 // Users
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({}).select('userId username email role active');
-    // Build simple screen time summaries using ScreenTime model
-    const all = await ScreenTime.find({}).select('userId date totalTime');
+    const page = Math.max(1, parseInt(req.query.page || '1', 10));
+    const limit = Math.max(1, Math.min(100, parseInt(req.query.limit || '10', 10)));
+    const skip = (page - 1) * limit;
+    // Fetch page of users
+    const [total, users] = await Promise.all([
+      User.countDocuments({}),
+      User.find({}).select('userId username email role active').sort({ userId: 1 }).skip(skip).limit(limit)
+    ]);
+    // Summaries for only users in this page
+    const ids = users.map(u => u.userId);
+    const all = await ScreenTime.find({ userId: { $in: ids } }).select('userId date totalTime');
     const byUser = {};
     all.forEach(x => {
       byUser[x.userId] = byUser[x.userId] || { total: 0, days: 0 };
       byUser[x.userId].total += Number(x.totalTime || 0);
       byUser[x.userId].days += 1;
     });
-    const result = users.map(u => ({
+    const data = users.map(u => ({
       userId: u.userId,
       username: u.username,
       email: u.email,
@@ -146,7 +174,7 @@ router.get('/users', async (req, res) => {
       totalScreenTime: byUser[u.userId]?.total || 0,
       daysTracked: byUser[u.userId]?.days || 0,
     }));
-    res.status(200).json(result);
+    res.status(200).json({ data, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (e) {
     res.status(500).json({ message: 'Failed to fetch users' });
   }

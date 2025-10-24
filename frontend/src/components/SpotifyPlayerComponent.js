@@ -1,3 +1,9 @@
+  // Maintain a small cache of recently used playlist IDs to avoid repetition on "Next"
+  const getRecent = () => {
+    try { return JSON.parse(localStorage.getItem('chillboardRecentPlaylists') || '[]'); } catch { return []; }
+  };
+  const setRecent = (arr) => localStorage.setItem('chillboardRecentPlaylists', JSON.stringify(arr.slice(0, 5)));
+
 import React, { useState, useEffect, useCallback } from 'react';
 import SpotifyPlayer from 'react-spotify-web-playback';
 import { ToastContainer, toast } from 'react-toastify';
@@ -14,8 +20,10 @@ import {
 
 const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) => {
   const [spotifyToken, setSpotifyToken] = useState('');
+  // Keep current playlist metadata and progress offset (in seconds)
   const [currentPlaylist, setCurrentPlaylist] = useState({ id: '', name: '', offset: 0 });
   const [isPlaying, setIsPlaying] = useState(false);
+
   const [deviceId, setDeviceId] = useState('');
   const [error, setError] = useState('');
   const [refreshingToken, setRefreshingToken] = useState(false);
@@ -89,9 +97,14 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       if (latestRecommendation?.type === 'music') {
         const details = JSON.parse(latestRecommendation.details);
         setCurrentPlaylist({ id: details.playlistId, name: details.name, offset: 0 });
+        // Auto-play when a recommendation of type music arrives
+        setTimeout(() => handlePlay(), 0);
       } else if (playbackState && !currentPlaylist.id) {
         const { id, offset, name } = JSON.parse(playbackState);
         setCurrentPlaylist({ id, name, offset });
+        // Auto resume if we had a previous session
+        const wasPlaying = localStorage.getItem('chillboardWasPlaying') === 'true';
+        if (wasPlaying) setTimeout(() => handlePlay(), 0);
       }
       await checkPlaylistSavedStatus();
     };
@@ -100,6 +113,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
     const handleBeforeUnload = () => {
       if (isPlaying && currentPlaylist.id) {
         localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: currentPlaylist.offset, name: currentPlaylist.name }));
+        localStorage.setItem('chillboardWasPlaying', 'true');
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
@@ -161,6 +175,7 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       const offset = playbackState ? JSON.parse(playbackState).offset || 0 : 0;
       setCurrentPlaylist(prev => ({ ...prev, offset }));
       showToast('Playback started!');
+      localStorage.setItem('chillboardWasPlaying', 'true');
     } catch (err) {
       console.error('Playback error:', err);
       setError(`Playback failed: ${err.message}`);
@@ -181,13 +196,29 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
       return;
     }
     try {
-      const newPlaylist = await fetchNewPlaylist(mood, true);
+      // Try fetching a fresh playlist; avoid repeating recent ones by retrying a few times
+      let attempts = 0;
+      let newPlaylist;
+      const recent = new Set(getRecent());
+      while (attempts < 3) {
+        // server supports skip=true which prefers new results
+        newPlaylist = await fetchNewPlaylist(mood, true);
+        if (!recent.has(newPlaylist.spotifyPlaylistId)) break;
+        attempts += 1;
+      }
+      // Update recent playlist cache to reduce repetition
+      const updatedRecent = [newPlaylist.spotifyPlaylistId, ...getRecent().filter(id => id !== newPlaylist.spotifyPlaylistId)];
+      setRecent(updatedRecent);
+
       setCurrentPlaylist({ id: newPlaylist.spotifyPlaylistId, name: newPlaylist.name, offset: 0 });
       setIsSaved(false);
       setError('');
       showToast('New playlist loaded!');
-      setIsPlaying(false);
+      // Auto play the newly fetched playlist
       localStorage.removeItem('chillboardPlaybackState');
+      localStorage.setItem('chillboardWasPlaying', 'true');
+      setIsPlaying(true);
+      await handlePlay();
       fetchRecommendations();
     } catch (err) {
       setError(`Failed to fetch new playlist: ${err.message}`);
@@ -240,7 +271,9 @@ const SpotifyPlayerComponent = ({ latestRecommendation, fetchRecommendations }) 
                   if (state.isPlaying) {
                     setCurrentPlaylist(prev => ({ ...prev, offset: state.progressMs / 1000 || 0 }));
                     localStorage.setItem('chillboardPlaybackState', JSON.stringify({ id: currentPlaylist.id, offset: state.progressMs / 1000, name: currentPlaylist.name }));
+                    localStorage.setItem('chillboardWasPlaying', 'true');
                   }
+
                   if (state.error) {
                     console.error('Playback error:', state.error);
                     setError(`Playback failed: ${state.error.message}`);

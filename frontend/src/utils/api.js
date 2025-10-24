@@ -195,11 +195,12 @@ export const patchUserSettings = async (settingsData) => {
   return response.data;
 };
 
-export const adminListChallenges = async () => {
+// Admin: list challenges with pagination
+export const adminListChallenges = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const res = await api.get('/admin/challenges', { headers: { Authorization: `Bearer ${token}` } });
-  return res.data;
+  const res = await api.get('/admin/challenges', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
+  return res.data; // { data, page, limit, total, totalPages }
 };
 
 export const adminCreateChallenge = async (payload) => {
@@ -223,11 +224,12 @@ export const adminDeleteChallenge = async (challengeId) => {
   return res.data;
 };
 
-export const adminListContacts = async () => {
+// Admin: list contacts with pagination
+export const adminListContacts = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const res = await api.get('/admin/contacts', { headers: { Authorization: `Bearer ${token}` } });
-  return res.data;
+  const res = await api.get('/admin/contacts', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
+  return res.data; // { data, page, limit, total, totalPages }
 };
 
 export const adminResolveContact = async (id, resolved) => {
@@ -237,11 +239,12 @@ export const adminResolveContact = async (id, resolved) => {
   return res.data;
 };
 
-export const adminListUsers = async () => {
+// Admin: list users with pagination
+export const adminListUsers = async (page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const res = await api.get('/admin/users', { headers: { Authorization: `Bearer ${token}` } });
-  return res.data;
+  const res = await api.get('/admin/users', { params: { page, limit }, headers: { Authorization: `Bearer ${token}` } });
+  return res.data; // { data, page, limit, total, totalPages }
 };
 
 export const adminUpdateUser = async (userId, payload) => {
@@ -275,11 +278,12 @@ export const submitReview = async ({ rating = 5, text, name, email }) => {
 };
 
 // Admin: list reviews by status (default pending)
-export const adminListReviews = async (status = 'pending') => {
+// Admin: list reviews with pagination
+export const adminListReviews = async (status = 'pending', page = 1, limit = 10) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const res = await api.get(`/admin/reviews`, { params: { status }, headers: { Authorization: `Bearer ${token}` } });
-  return res.data;
+  const res = await api.get(`/admin/reviews`, { params: { status, page, limit }, headers: { Authorization: `Bearer ${token}` } });
+  return res.data; // { data, page, limit, total, totalPages }
 };
 
 // Admin: approve review

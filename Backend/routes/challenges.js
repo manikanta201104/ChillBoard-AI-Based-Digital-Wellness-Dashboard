@@ -244,7 +244,8 @@ router.get('/leaderboard', authMiddleware, async (req, res) => {
     }
 
     if (!challenge.participants || !Array.isArray(challenge.participants) || challenge.participants.length === 0) {
-      return res.status(400).json({ message: 'No participants in this challenge' });
+      // Friendly empty state: return an empty leaderboard instead of error
+      return res.status(200).json([]);
     }
 
     let rank = 1;
