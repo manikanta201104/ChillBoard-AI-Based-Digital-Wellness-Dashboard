@@ -3,6 +3,12 @@ let totalTime = 0;
 let currentTabId = null;
 let tabStartTime = null;
 let tabUsage = []; // Now includes { tabId, url, timeSpent }
+
+function safeInitialize() {
+  if (hasInitialized) return;
+  hasInitialized = true;
+  initializeStorage();
+}
 let lastSyncDate = new Date().toISOString().split('T')[0];
 let offlineQueue = [];
 let activeTabTimer = null;
@@ -14,6 +20,7 @@ let isOnline = true; // Initial assumption
 let isSystemIdle = false; // Track system idle state
 let isMediaActive = false; // Track if media is playing in the current tab
 let isAuthenticated = false; // NEW: Track whether a valid JWT is present
+let hasInitialized = false; // NEW: ensure initializeStorage only runs once per activation
 
 console.log('Service worker started');
 
@@ -331,16 +338,16 @@ async function refreshJwt() {
   }
 }
 
-chrome.runtime.onInstalled.addEventListener(() => {
+chrome.runtime.onInstalled.addListener(() => {
   console.log('Extension installed');
   notifyUser('ChillBoard ready!', 'success');
-  initializeStorage();
+  safeInitialize();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   console.log('Extension startup');
   notifyUser('ChillBoard started', 'info');
-  initializeStorage();
+  safeInitialize();
 });
 
 chrome.runtime.onSuspend.addListener(() => {
@@ -806,4 +813,5 @@ function checkMediaActivity(url) {
 chrome.runtime.onInstalled.addListener(setupIdleDetection);
 chrome.runtime.onStartup.addListener(setupIdleDetection);
 
-initializeStorage();
+// Also initialize on activation/load of the service worker
+safeInitialize();
