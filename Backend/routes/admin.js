@@ -4,6 +4,7 @@ import Challenge from '../models/challenge.js';
 import ContactMessage from '../models/contactmessage.js';
 import User from '../models/user.js';
 import ScreenTime from '../models/screenTime.js';
+import Review from '../models/review.js';
 
 const router = express.Router();
 
@@ -14,6 +15,7 @@ router.use(authMiddleware, verifyAdmin);
 router.get('/challenges', async (req, res) => {
   try {
     const list = await Challenge.find({}).sort({ createdAt: -1 });
+    // Return all challenges for admin management
     res.status(200).json(list);
   } catch (e) {
     res.status(500).json({ message: 'Failed to fetch challenges' });

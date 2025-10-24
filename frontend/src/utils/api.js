@@ -251,6 +251,45 @@ export const adminUpdateUser = async (userId, payload) => {
   return res.data;
 };
 
+// NEW: Admin - delete a user
+export const adminDeleteUser = async (userId) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.delete(`/admin/users/${userId}`, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+// Reviews APIs
+// Public: get approved reviews for landing page
+export const getApprovedReviews = async () => {
+  const res = await api.get('/reviews');
+  return res.data;
+};
+
+// Authenticated: submit a review (goes to pending)
+export const submitReview = async ({ rating, text, name }) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.post('/reviews', { rating, text, name }, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+// Admin: list reviews by status (default pending)
+export const adminListReviews = async (status = 'pending') => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.get(`/admin/reviews`, { params: { status }, headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
+// Admin: approve review
+export const adminApproveReview = async (id) => {
+  const token = localStorage.getItem('jwt');
+  if (!token) throw new Error('No token found');
+  const res = await api.patch(`/admin/reviews/${id}/approve`, {}, { headers: { Authorization: `Bearer ${token}` } });
+  return res.data;
+};
+
 export const sendContactMessage = async (contactData) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');

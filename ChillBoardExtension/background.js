@@ -563,10 +563,24 @@ chrome.webNavigation.onCommitted.addListener(details => {
 });
 
 const SYNC_INTERVAL_MS = 300000; // 5 minutes in milliseconds
+// Create two alarms: one to push local data (syncData) and another to pull latest from server (pullServerData)
 chrome.alarms.create('syncData', { periodInMinutes: 5 });
+chrome.alarms.create('pullServerData', { periodInMinutes: 5 });
 
-chrome.alarms.onAlarm.addListener(alarm => {
-  if (alarm.name === 'syncData') syncData();
+chrome.alarms.onAlarm.addListener(async (alarm) => {
+  if (alarm.name === 'syncData') {
+    syncData();
+  } else if (alarm.name === 'pullServerData') {
+    // Periodically pull from server so DB remains source of truth and manual DB changes reflect in extension
+    try {
+      const { jwt } = await getStorageData(['jwt']);
+      if (!jwt) return;
+      const currentDate = new Date().toISOString().split('T')[0];
+      await fetchServerData(jwt, currentDate);
+    } catch (e) {
+      console.warn('Periodic server pull failed', e?.message || e);
+    }
+  }
 });
 
 async function syncData(maxRetries = 3) {

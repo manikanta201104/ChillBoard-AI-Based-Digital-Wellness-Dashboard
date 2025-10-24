@@ -11,6 +11,7 @@ import spotifyRoutes from './routes/spotify.js';
 import challengesRoutes from './routes/challenges.js';
 import adminRoutes from './routes/admin.js';
 import contactRoutes from './routes/contact.js';
+import reviewsRoutes from './routes/reviews.js';
 
 dotenv.config ();
 
@@ -84,6 +85,7 @@ app.use ('/spotify', spotifyRoutes);
 app.use ('/challenges', challengesRoutes);
 app.use ('/contact', contactRoutes);
 app.use ('/admin', adminRoutes);
+app.use ('/reviews', reviewsRoutes);
 
 // MongoDB Connection
 mongoose

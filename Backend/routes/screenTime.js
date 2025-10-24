@@ -63,10 +63,27 @@ router.post('/', authMiddleware, async (req, res) => {
       screenTimeId = `st_${Date.now()}_${userId}`;
     }
 
+    // Merge with existing record, making the DB the source of truth to avoid accidental decreases.
+    const existing = await ScreenTime.findOne({ userId, date });
+    let mergedTabs = aggregatedTabs;
+    let mergedTotal = totalTime;
+    if (existing) {
+      // Merge tabs by URL, taking the maximum time per URL so manual edits are not lost
+      const byUrl = new Map();
+      (existing.tabs || []).forEach(t => byUrl.set(t.url, Math.max(0, Number(t.timeSpent || 0))));
+      aggregatedTabs.forEach(t => {
+        const prev = byUrl.get(t.url) || 0;
+        byUrl.set(t.url, Math.max(prev, Math.max(0, Number(t.timeSpent || 0))));
+      });
+      mergedTabs = Array.from(byUrl.entries()).map(([url, timeSpent]) => ({ url, timeSpent }));
+      // Never decrease totalTime: store the maximum between incoming and existing
+      mergedTotal = Math.max(Number(existing.totalTime || 0), Number(totalTime || 0));
+    }
+
     const updated = await ScreenTime.findOneAndUpdate(
       { userId, date },
       {
-        $set: { totalTime, tabs: aggregatedTabs },
+        $set: { totalTime: mergedTotal, tabs: mergedTabs },
         $setOnInsert: { screenTimeId, userId, date }
       },
       { new: true, upsert: true }

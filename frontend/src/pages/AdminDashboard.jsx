@@ -10,6 +10,9 @@ import {
   adminResolveContact,
   adminListUsers,
   adminUpdateUser,
+  adminDeleteUser,
+  adminListReviews,
+  adminApproveReview,
 } from '../utils/api';
 
 // AdminDashboard.jsx
@@ -26,6 +29,7 @@ export default function AdminDashboard() {
   const [challenges, setChallenges] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [users, setUsers] = useState([]);
+  const [pendingReviews, setPendingReviews] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState('');
@@ -55,14 +59,16 @@ export default function AdminDashboard() {
     (async () => {
       try {
         setLoading(true);
-        const [ch, ct, us] = await Promise.all([
+        const [ch, ct, us, rv] = await Promise.all([
           adminListChallenges(),
           adminListContacts(),
           adminListUsers(),
+          adminListReviews('pending'),
         ]);
         setChallenges(ch);
         setContacts(ct);
         setUsers(us);
+        setPendingReviews(rv);
       } catch (e) {
         setMessage('Failed to load admin data');
         setTimeout(() => setMessage(''), 3000);
@@ -83,6 +89,33 @@ export default function AdminDashboard() {
       setTimeout(() => setMessage(''), 2000);
     } catch {
       setMessage('Failed to create challenge');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // Delete a user (admin-only)
+  const deleteUser = async (userId) => {
+    if (!window.confirm('Are you sure you want to permanently delete this user? This cannot be undone.')) return;
+    try {
+      await adminDeleteUser(userId);
+      setUsers(prev => prev.filter(u => u.userId !== userId));
+      setMessage('User deleted');
+      setTimeout(() => setMessage(''), 2000);
+    } catch {
+      setMessage('Failed to delete user');
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
+  // Approve review
+  const approveReview = async (id) => {
+    try {
+      await adminApproveReview(id);
+      setPendingReviews(prev => prev.filter(r => r._id !== id));
+      setMessage('Review approved');
+      setTimeout(() => setMessage(''), 2000);
+    } catch {
+      setMessage('Failed to approve review');
       setTimeout(() => setMessage(''), 3000);
     }
   };
@@ -249,9 +282,44 @@ export default function AdminDashboard() {
                     <td className="p-2">{u.daysTracked}</td>
                     <td className="p-2 space-x-2">
                       <button className="px-2 py-1 rounded bg-slate-100" onClick={() => updateUser(u.userId, { resetChallengeProgress: true })}>Reset Challenges</button>
+                      <button className="px-2 py-1 rounded bg-red-600 text-white" onClick={() => deleteUser(u.userId)}>Delete</button>
                     </td>
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Reviews moderation */}
+        <section className="bg-white rounded-lg border border-slate-200 p-6">
+          <h2 className="text-xl font-semibold mb-4">Pending Reviews</h2>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="text-left border-b">
+                  <th className="p-2">User</th>
+                  <th className="p-2">Rating</th>
+                  <th className="p-2">Text</th>
+                  <th className="p-2">Submitted</th>
+                  <th className="p-2">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingReviews.map(rv => (
+                  <tr key={rv._id} className="border-b">
+                    <td className="p-2">{rv.name || rv.userId}</td>
+                    <td className="p-2">{rv.rating}</td>
+                    <td className="p-2 max-w-xl truncate" title={rv.text}>{rv.text}</td>
+                    <td className="p-2">{new Date(rv.createdAt).toLocaleString()}</td>
+                    <td className="p-2">
+                      <button className="px-2 py-1 rounded bg-green-600 text-white" onClick={() => approveReview(rv._id)}>Approve</button>
+                    </td>
+                  </tr>
+                ))}
+                {pendingReviews.length === 0 && (
+                  <tr><td className="p-2 text-slate-500" colSpan="5">No pending reviews</td></tr>
+                )}
               </tbody>
             </table>
           </div>
