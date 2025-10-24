@@ -17,9 +17,9 @@ router.get('/', async (req, res) => {
 // Authenticated: POST /reviews - submit a review (goes to pending)
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { rating, text, name } = req.body;
+    const { rating, text, name, email } = req.body;
     if (!rating || !text) return res.status(400).json({ message: 'rating and text are required' });
-    const doc = new Review({ userId: req.user.userId, name: name || 'Anonymous', rating, text, status: 'pending' });
+    const doc = new Review({ userId: req.user.userId, name: name || 'Anonymous', email, rating, text, status: 'pending' });
     await doc.save();
     return res.status(201).json({ message: 'Review submitted and pending approval', review: doc });
   } catch (e) {

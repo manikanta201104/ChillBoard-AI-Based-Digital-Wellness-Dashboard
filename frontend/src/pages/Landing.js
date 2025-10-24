@@ -2,13 +2,12 @@ import React, { useState, useEffect } from 'react';
 import AuthForm from '../components/AuthForm';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import { getApprovedReviews, submitReview } from '../utils/api';
+import { getApprovedReviews } from '../utils/api';
+import ReviewForm from '../components/ReviewForm';
 
 const Landing = () => {
   const [showForm, setShowForm] = useState(null);
   const [reviews, setReviews] = useState([]);
-  const [reviewForm, setReviewForm] = useState({ name: '', rating: 5, text: '' });
-  const [submitting, setSubmitting] = useState(false);
   const isLoggedIn = !!localStorage.getItem('jwt');
 
   const handleAuthSuccess = () => {
@@ -28,25 +27,7 @@ const Landing = () => {
     })();
   }, []);
 
-  // Submit a review (goes to pending until admin approves)
-  const handleSubmitReview = async (e) => {
-    e.preventDefault();
-    if (!isLoggedIn) return;
-    setSubmitting(true);
-    try {
-      await submitReview({
-        name: reviewForm.name,
-        rating: Number(reviewForm.rating),
-        text: reviewForm.text,
-      });
-      setReviewForm({ name: '', rating: 5, text: '' });
-      alert('Thanks! Your review is pending approval.');
-    } catch (e) {
-      alert('Failed to submit review.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
+  // Review submission moved into standalone ReviewForm component
 
   return (
     <div className="min-h-screen bg-slate-50 relative overflow-hidden">
@@ -200,42 +181,7 @@ const Landing = () => {
                 </div>
 
                 {/* Submit review form for logged-in users */}
-                {isLoggedIn && (
-                  <form onSubmit={handleSubmitReview} className="space-y-3">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                      <input
-                        type="text"
-                        placeholder="Your name (optional)"
-                        value={reviewForm.name}
-                        onChange={(e) => setReviewForm({ ...reviewForm, name: e.target.value })}
-                        className="border border-slate-300 rounded-lg p-3"
-                      />
-                      <select
-                        value={reviewForm.rating}
-                        onChange={(e) => setReviewForm({ ...reviewForm, rating: e.target.value })}
-                        className="border border-slate-300 rounded-lg p-3"
-                      >
-                        {[5,4,3,2,1].map(n => <option key={n} value={n}>{n} Stars</option>)}
-                      </select>
-                      <button
-                        type="submit"
-                        disabled={submitting}
-                        className="bg-slate-600 text-white rounded-lg px-4 py-3 disabled:bg-slate-400"
-                      >
-                        {submitting ? 'Submitting...' : 'Submit Review'}
-                      </button>
-                    </div>
-                    <textarea
-                      placeholder="Share your experience..."
-                      value={reviewForm.text}
-                      onChange={(e) => setReviewForm({ ...reviewForm, text: e.target.value })}
-                      rows={3}
-                      className="w-full border border-slate-300 rounded-lg p-3"
-                      required
-                    />
-                    <p className="text-xs text-slate-500">Your review will be visible after admin approval.</p>
-                  </form>
-                )}
+                {isLoggedIn && (<ReviewForm />)}
               </div>
             </div>
 

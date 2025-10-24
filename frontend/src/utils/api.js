@@ -267,10 +267,10 @@ export const getApprovedReviews = async () => {
 };
 
 // Authenticated: submit a review (goes to pending)
-export const submitReview = async ({ rating, text, name }) => {
+export const submitReview = async ({ rating = 5, text, name, email }) => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
-  const res = await api.post('/reviews', { rating, text, name }, { headers: { Authorization: `Bearer ${token}` } });
+  const res = await api.post('/api/reviews', { rating, text, name, email }, { headers: { Authorization: `Bearer ${token}` } });
   return res.data;
 };
 

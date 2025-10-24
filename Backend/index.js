@@ -86,6 +86,8 @@ app.use ('/challenges', challengesRoutes);
 app.use ('/contact', contactRoutes);
 app.use ('/admin', adminRoutes);
 app.use ('/reviews', reviewsRoutes);
+// Alias for clients calling /api/reviews
+app.use ('/api/reviews', reviewsRoutes);
 
 // MongoDB Connection
 mongoose
