@@ -23,7 +23,8 @@ const scopes = [
   'user-modify-playback-state',
 ];
 
-// Mood to Spotify category mapping
+// Mood/category to Spotify search category mapping
+// Extended to support richer recommendation categories
 const moodCategoryMap = {
   stressed: 'calm',
   tired: 'relax',
@@ -32,6 +33,15 @@ const moodCategoryMap = {
   angry: 'energetic',
   calm: 'chill',
   neutral: 'chill',
+  // new direct categories used by recommendations
+  focus: 'focus',
+  relax: 'relax',
+  energy: 'energetic',
+  sleep: 'sleep',
+  workout: 'energetic',
+  study: 'focus',
+  morning: 'upbeat',
+  evening: 'relax',
   default: 'chill',
 };
 

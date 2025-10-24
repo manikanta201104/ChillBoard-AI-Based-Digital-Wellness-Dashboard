@@ -30,7 +30,7 @@ router.post('/', authMiddleware, async (req, res) => {
     // Fetch latest Mood data
     const latestMood = await Mood.findOne({ userId }).sort({ timestamp: -1 }).limit(1);
 
-    // Default recommendation
+    // Default recommendation placeholder that we will override when rules match
     let recommendation = {
       type: 'message',
       details: { message: 'Keep up the good work!' },
@@ -45,56 +45,99 @@ router.post('/', authMiddleware, async (req, res) => {
       const mood = latestMood.mood.toLowerCase();
       console.log('Evaluating recommendation with:', { totalTime, mood, timestamp: latestMood.timestamp, rawTotalTime: latestScreenTime.totalTime });
 
+      // Helper to fetch a Spotify playlist for a semantic category (mapped in spotify.js)
+      const getPlaylistRec = async (category, note) => {
+        const playlistResponse = await axios.get(`${process.env.BACKEND_URL}/spotify/playlist?mood=${encodeURIComponent(category)}`, {
+          headers: { Authorization: req.headers.authorization },
+        });
+        const { spotifyPlaylistId, name } = playlistResponse.data;
+        return {
+          type: 'music',
+          details: { playlistId: spotifyPlaylistId, name },
+          trigger: { category, totalTime: `${Math.round(totalTime)}m`, mood },
+          triggerSource: 'mood',
+          triggerNote: note,
+        };
+      };
+
       // Check most specific conditions first
+      // 1) Very high usage + stressed: calm/relaxing
       if (totalTime > 300 && mood === 'stressed') {
         try {
-          const playlistResponse = await axios.get(`${process.env.BACKEND_URL}/spotify/playlist?mood=calm`, {
-            headers: { Authorization: req.headers.authorization },
-          });
-          const { spotifyPlaylistId, name } = playlistResponse.data;
-          recommendation = {
-            type: 'music',
-            details: {
-              playlistId: spotifyPlaylistId,
-              name,
-            },
-            trigger: { screenTime: '>5h', mood: 'stressed' },
-            triggerSource: 'mood',
-            triggerNote: 'Music suggested for stress',
-          };
+          recommendation = await getPlaylistRec('calm', 'Music suggested for stress');
           console.log('Music recommendation triggered:', { playlistId: spotifyPlaylistId, name });
         } catch (spotifyError) {
           console.error('Spotify API error:', spotifyError.message);
           recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
         }
+      // 2) Long usage + tired: sleep or relax depending on time of day
       } else if (totalTime > 180 && mood === 'tired') {
         try {
-          const playlistResponse = await axios.get(`${process.env.BACKEND_URL}/spotify/playlist?mood=tired`, {
-            headers: { Authorization: req.headers.authorization },
-          });
-          const { spotifyPlaylistId, name } = playlistResponse.data;
-          recommendation = {
-            type: 'music',
-            details: {
-              playlistId: spotifyPlaylistId,
-              name,
-            },
-            trigger: { screenTime: '>3h', mood: 'tired' },
-            triggerSource: 'mood',
-            triggerNote: 'Music suggested for tiredness',
-          };
+          const hour = new Date().getHours();
+          const cat = hour >= 21 || hour < 6 ? 'sleep' : 'relax';
+          recommendation = await getPlaylistRec(cat, 'Music suggested for tiredness');
         } catch (spotifyError) {
           console.error('Spotify API error:', spotifyError.message);
           recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
         }
+      // 3) Happy: upbeat/focus based on time (morning focus, otherwise upbeat)
       } else if (mood === 'happy') {
-        recommendation = {
-          type: 'message',
-          details: { message: 'You’re doing great!' },
-          trigger: { mood: 'happy' },
-          triggerSource: 'mood',
-          triggerNote: 'Triggered by positive mood',
-        };
+        const hour = new Date().getHours();
+        if (hour >= 6 && hour < 11) {
+          try {
+            recommendation = await getPlaylistRec('focus', 'Morning focus boost for happy mood');
+          } catch (spotifyError) {
+            console.error('Spotify API error:', spotifyError.message);
+            recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+          }
+        } else {
+          try {
+            recommendation = await getPlaylistRec('upbeat', 'Upbeat tunes for a happy mood');
+          } catch (spotifyError) {
+            console.error('Spotify API error:', spotifyError.message);
+            recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+          }
+        }
+      // 4) Angry: energy/workout to vent
+      } else if (mood === 'angry') {
+        try {
+          recommendation = await getPlaylistRec('energy', 'High-energy music for anger relief');
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
+      // 5) Sad: chill first; if usage low, suggest upbeat to lift mood
+      } else if (mood === 'sad') {
+        try {
+          recommendation = await getPlaylistRec(totalTime < 60 ? 'upbeat' : 'chill', 'Mood support for sadness');
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
+      // 6) Neutral/calm + high usage: focus
+      } else if ((mood === 'neutral' || mood === 'calm') && totalTime > 120) {
+        try {
+          recommendation = await getPlaylistRec('focus', 'Deep focus after extended screen time');
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
+      // 7) Morning routine
+      } else if (new Date().getHours() >= 5 && new Date().getHours() < 9) {
+        try {
+          recommendation = await getPlaylistRec('morning', 'Morning routine boost');
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
+      // 8) Evening wind-down
+      } else if (new Date().getHours() >= 20 && new Date().getHours() <= 23) {
+        try {
+          recommendation = await getPlaylistRec('evening', 'Evening wind-down');
+        } catch (spotifyError) {
+          console.error('Spotify API error:', spotifyError.message);
+          recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
+        }
       } else {
         console.log('No matching condition met:', { totalTime, mood });
       }
