@@ -14,7 +14,8 @@ export const authMiddleware = (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, config.jwtSecret);
-    req.user = { userId: decoded.userId }; // Ensure userId is a string from JWT
+    // Include role from token when present to avoid extra DB lookups
+    req.user = { userId: decoded.userId, role: decoded.role };
     next();
   } catch (error) {
     logger.warn('Invalid token', { error: error.message });
@@ -28,17 +29,15 @@ export const authMiddleware = (req, res, next) => {
 // NEW: verifyAdmin middleware for admin-only APIs
 export const verifyAdmin = async (req, res, next) => {
   try {
+    // Fast-path: trust JWT role when it's 'admin'
+    if (req.user?.role === 'admin') return next();
+
+    // Fallback to DB check if token lacks role field
     const { default: User } = await import('../models/user.js');
     const user = await User.findOne({ userId: req.user.userId }).select('role active');
-    if (!user) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-    if (!user.active) {
-      return res.status(403).json({ message: 'User account is deactivated' });
-    }
-    if (user.role !== 'admin') {
-      return res.status(403).json({ message: 'Admin access required' });
-    }
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    if (!user.active) return res.status(403).json({ message: 'User account is deactivated' });
+    if (user.role !== 'admin') return res.status(403).json({ message: 'Admin access required' });
     next();
   } catch (error) {
     logger.error('verifyAdmin error', { error: error.message });

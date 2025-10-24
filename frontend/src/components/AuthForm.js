@@ -24,10 +24,11 @@ const AuthForm = ({ type, onSuccess }) => {
         ? await signup(userData)
         : await login(userData);
 
-      // Store tokens and userId in localStorage
+      // Store tokens, userId, and role in localStorage for route guards
       localStorage.setItem('jwt', response.token);
       localStorage.setItem('refreshToken', response.refreshToken);
       localStorage.setItem('userId', response.userId);
+      if (response.role) localStorage.setItem('role', response.role); // Store role if provided in backend response
 
       // Send message to trigger state reset in other components
       window.postMessage({ type: 'loginSuccess', clearChallengeData: response.clearChallengeData || false }, '*');
@@ -41,6 +42,11 @@ const AuthForm = ({ type, onSuccess }) => {
         pauseOnHover: true,
         draggable: true,
       });
+
+      // If admin, persist role and optionally navigate based on onSuccess
+      if (response.role === 'admin') {
+        // Add logic here to handle admin role, e.g., navigate to admin dashboard
+      }
 
       onSuccess();
     } catch (err) {

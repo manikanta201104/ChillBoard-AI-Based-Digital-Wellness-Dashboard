@@ -1,5 +1,6 @@
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import bcrypt from 'bcrypt';
 import { logger } from '../index.js';
 import User from '../models/user.js';
 import { config } from '../config/env.js';
@@ -12,6 +13,11 @@ const router = express.Router();
 router.post('/signup', async (req, res) => {
   const { username, email, password } = req.body;
   try {
+    // Prevent any signup attempt using the fixed admin email
+    if (email === 'manikanta02244021@gmail.com') {
+      logger.warn('Signup blocked for admin email');
+      return res.status(403).json({ message: 'Registration not allowed for this email' });
+    }
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       logger.warn('Signup failed: Email already exists', { email });
@@ -50,20 +56,66 @@ router.post('/signup', async (req, res) => {
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
   try {
+    // Admin restriction: only a single fixed admin email/password combination is allowed.
+    // The password is compared securely via bcrypt. Provide the hash via ENV; fallback to hardcoded for initial setup.
+    const ADMIN_EMAIL = 'manikanta02244021@gmail.com';
+    const ADMIN_HASH = process.env.ADMIN_PASSWORD_HASH; // set this in ENV for secure deployments
+
+    if (email === ADMIN_EMAIL) {
+      // Secure path: when ADMIN_PASSWORD_HASH is set, verify via bcrypt
+      // Dev/initial path: if no hash is configured, allow exact plaintext match
+      let ok = false;
+      if (ADMIN_HASH) {
+        ok = await bcrypt.compare(password, ADMIN_HASH);
+      } else {
+        ok = password === 'Manikanta20@#';
+      }
+      if (!ok) {
+        logger.warn('Admin login failed: invalid password', { email });
+        return res.status(401).json({ message: 'Invalid credentials' });
+      }
+      // Ensure an admin user exists/upsert in DB, so downstream queries work.
+      let adminUser = await User.findOne({ email });
+      if (!adminUser) {
+        adminUser = new User({
+          userId: `admin_${Date.now()}`,
+          username: 'Admin',
+          email,
+          password: await bcrypt.hash(password, 10),
+          role: 'admin',
+          active: true,
+          preferences: {},
+        });
+      } else {
+        adminUser.role = 'admin';
+        adminUser.active = true;
+      }
+      const accessToken = jwt.sign({ userId: adminUser.userId, role: 'admin' }, config.jwtSecret, { expiresIn: '24h' });
+      const refreshToken = jwt.sign({ userId: adminUser.userId, role: 'admin' }, config.jwtSecret, { expiresIn: '7d' });
+      adminUser.spotifyToken = {
+        accessToken,
+        refreshToken,
+        expiresIn: 86400,
+        obtainedAt: new Date(),
+      };
+      await adminUser.save();
+      logger.info('Admin logged in successfully', { email, userId: adminUser.userId });
+      return res.status(200).json({ token: accessToken, refreshToken, userId: adminUser.userId, role: 'admin' });
+    }
+
+    // Normal user login flow, role defaults to 'user'
     const user = await User.findOne({ email });
     if (!user) {
       logger.warn('Login failed: User not found', { email });
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       logger.warn('Login failed: Invalid password', { email });
       return res.status(401).json({ message: 'Invalid credentials' });
     }
-
-    const accessToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '24h' });
-    const refreshToken = jwt.sign({ userId: user.userId }, config.jwtSecret, { expiresIn: '7d' });
+    const accessToken = jwt.sign({ userId: user.userId, role: 'user' }, config.jwtSecret, { expiresIn: '24h' });
+    const refreshToken = jwt.sign({ userId: user.userId, role: 'user' }, config.jwtSecret, { expiresIn: '7d' });
     user.spotifyToken = {
       accessToken,
       refreshToken,
@@ -71,17 +123,11 @@ router.post('/login', async (req, res) => {
       obtainedAt: new Date(),
     };
     await user.save();
-
     logger.info('User logged in successfully', { email, userId: user.userId });
-    res.status(200).json({ 
-      token: accessToken, 
-      refreshToken, 
-      userId: user.userId,
-      clearChallengeData: true
-    });
+    return res.status(200).json({ token: accessToken, refreshToken, userId: user.userId, role: 'user', clearChallengeData: true });
   } catch (error) {
     logger.error('Error during login:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 

@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import Challenges from './pages/Challenges';
@@ -21,6 +21,16 @@ const ProtectedLayout = () => {
   );
 };
 
+// Admin-only guard: ensures JWT exists and role is 'admin'
+const AdminRoute = () => {
+  const token = localStorage.getItem('jwt');
+  const role = localStorage.getItem('role');
+  if (!token || role !== 'admin') {
+    return <Navigate to="/" replace />; // Redirect non-admins to home/login
+  }
+  return <Outlet />;
+};
+
 function App() {
   return (
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
@@ -33,7 +43,9 @@ function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/about" element={<About />} />
           <Route path="/privacy" element={<Privacy />} />
-          <Route path="/admin" element={<AdminDashboard />} />
+          <Route element={<AdminRoute />}>
+            <Route path="/admin" element={<AdminDashboard />} />
+          </Route>
         </Route>
       </Routes>
     </Router>
