@@ -11,6 +11,7 @@ import spotifyRoutes from './routes/spotify.js';
 import challengesRoutes from './routes/challenges.js';
 import adminRoutes from './routes/admin.js';
 import contactRoutes from './routes/contact.js';
+import contextRoutes from './routes/context.js';
 import reviewsRoutes from './routes/reviews.js';
 
 dotenv.config ();
@@ -88,6 +89,8 @@ app.use ('/admin', adminRoutes);
 app.use ('/reviews', reviewsRoutes);
 // Alias for clients calling /api/reviews
 app.use ('/api/reviews', reviewsRoutes);
+// Context ingestion and aggregates
+app.use ('/context', contextRoutes);
 
 // MongoDB Connection
 mongoose
@@ -99,3 +102,4 @@ const PORT = process.env.PORT || 5000;
 app.listen (PORT, () => {
   logger.info (`Server running on port ${PORT}`);
 });
+

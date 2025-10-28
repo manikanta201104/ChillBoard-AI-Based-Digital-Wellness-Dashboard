@@ -4,6 +4,19 @@ let currentTabId = null;
 let tabStartTime = null;
 let tabUsage = []; // Now includes { tabId, url, timeSpent }
 
+// Basic privacy-preserving categorization from hostname only
+function categorizeHost(hostname) {
+  const h = (hostname || '').toLowerCase();
+  if (!h) return 'other';
+  if (['youtube.com', 'netflix.com', 'twitch.tv', 'primevideo.com', 'vimeo.com'].some(d => h.includes(d))) return 'entertainment';
+  if (['github.com', 'gitlab.com', 'bitbucket.org', 'stackOverflow.com', 'stackoverflow.com'].some(d => h.includes(d))) return 'dev';
+  if (['docs.google.com', 'notion.so', 'slack.com', 'trello.com', 'figma.com', 'microsoft.com'].some(d => h.includes(d))) return 'productivity';
+  if (['wikipedia.org', 'medium.com', 'khanacademy.org', 'udemy.com', 'coursera.org'].some(d => h.includes(d))) return 'education';
+  if (['twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'reddit.com', 'tiktok.com'].some(d => h.includes(d))) return 'social';
+  if (['bbc.com', 'nytimes.com', 'theguardian.com', 'cnn.com', 'reuters.com'].some(d => h.includes(d))) return 'news';
+  return 'other';
+}
+
 function safeInitialize() {
   if (hasInitialized) return;
   hasInitialized = true;
@@ -669,6 +682,38 @@ async function syncData(maxRetries = 3) {
             }
             throw new Error(`Sync failed: ${response.status} - ${response.statusText}`);
           }
+          // For current date, also send context delta events (hostname-only, no titles)
+          if (item.date === currentDate) {
+            try {
+              const deltaTabs = calculateTabUsageDelta(tabUsage, lastSyncedTabUsage);
+              if (deltaTabs.length > 0) {
+                // Aggregate seconds by hostname+category
+                const agg = new Map();
+                for (const t of deltaTabs) {
+                  const host = extractHostname(t.url);
+                  const cat = categorizeHost(host);
+                  const key = `${host}|${cat}`;
+                  const prev = agg.get(key) || 0;
+                  agg.set(key, prev + Math.max(0, Number(t.timeSpent || 0)));
+                }
+                const events = Array.from(agg.entries()).map(([key, seconds]) => {
+                  const [hostname, category] = key.split('|');
+                  return { date: currentDate, hostname, category, seconds };
+                });
+                if (events.length > 0) {
+                  await fetch('https://chillboard-6uoj.onrender.com/context/events', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${jwt}` },
+                    body: JSON.stringify({ events }),
+                    signal: AbortSignal.timeout(10000)
+                  }).catch(() => {});
+                }
+              }
+            } catch (e) {
+              console.warn('Context events post skipped:', e?.message || e);
+            }
+          }
+
           sentDates.add(item.date);
           break;
         } catch (error) {
