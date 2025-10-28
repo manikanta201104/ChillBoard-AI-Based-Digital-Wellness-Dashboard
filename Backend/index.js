@@ -13,6 +13,7 @@ import adminRoutes from './routes/admin.js';
 import contactRoutes from './routes/contact.js';
 import contextRoutes from './routes/context.js';
 import reviewsRoutes from './routes/reviews.js';
+import devRoutes from './routes/dev.js';
 
 dotenv.config ();
 
@@ -91,6 +92,11 @@ app.use ('/reviews', reviewsRoutes);
 app.use ('/api/reviews', reviewsRoutes);
 // Context ingestion and aggregates
 app.use ('/context', contextRoutes);
+
+// Local development-only endpoints
+if (process.env.DEV_MODE === 'true') {
+  app.use('/dev', devRoutes);
+}
 
 // MongoDB Connection
 mongoose

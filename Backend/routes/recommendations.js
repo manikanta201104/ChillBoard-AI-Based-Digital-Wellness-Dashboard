@@ -3,6 +3,7 @@ import { logger } from '../index.js';
 import ScreenTime from '../models/screenTime.js';
 import Mood from '../models/mood.js';
 import Recommendation from '../models/recommendation.js';
+import ContextEvent from '../models/contextEvent.js';
 import TriggerLink from '../models/triggerLink.js';
 import { authMiddleware } from '../middleware/auth.js';
 import axios from 'axios';
@@ -59,6 +60,66 @@ router.post('/', authMiddleware, async (req, res) => {
           triggerNote: note,
         };
       };
+
+      // DEV: SL-based policy using context aggregates (local only)
+      if (process.env.DEV_MODE === 'true' && process.env.DEV_SL === 'true') {
+        try {
+          const todayYmd = new Date().toISOString().split('T')[0];
+          const agg = await ContextEvent.aggregate([
+            { $match: { userId, date: todayYmd } },
+            { $group: { _id: '$category', seconds: { $sum: '$seconds' } } },
+          ]);
+          const byCat = Object.fromEntries(agg.map(a => [a._id, a.seconds]));
+          const totalSec = Object.values(byCat).reduce((a,b)=>a+b,0) || 0;
+          const share = (k) => totalSec ? (byCat[k] || 0) / totalSec : 0;
+          const shares = {
+            entertainment: share('entertainment'),
+            education: share('education'),
+            productivity: share('productivity'),
+            social: share('social'),
+            news: share('news'),
+            dev: share('dev'),
+            other: share('other'),
+          };
+          const mins = Math.round(latestScreenTime.totalTime / 60);
+          const workload = shares.productivity + shares.education + shares.dev;
+          const entertainment = shares.entertainment + shares.social + shares.news * 0.7;
+          let sl = 0.4 * Math.min(1, mins / 300) + 0.4 * Math.max(0, workload - entertainment) + 0.2 * shares.news;
+          sl = Math.max(0, Math.min(1, sl));
+          const ctxLabel = workload > entertainment ? 'worklike' : (entertainment > 0.5 ? 'entertainment' : 'mixed');
+
+          // Policy mapping
+          const hour = new Date().getHours();
+          let cat = 'chill';
+          if (sl >= 0.7) {
+            if (ctxLabel === 'worklike') cat = 'focus';
+            else cat = hour >= 21 || hour < 6 ? 'sleep' : 'calm';
+          } else if (sl >= 0.4) {
+            if (ctxLabel === 'worklike') cat = 'focus';
+            else cat = hour >= 20 ? 'relax' : 'upbeat';
+          } else {
+            if (ctxLabel === 'entertainment') cat = 'upbeat';
+            else cat = hour >= 21 || hour < 6 ? 'sleep' : 'chill';
+          }
+
+          try {
+            const rec = await getPlaylistRec(cat, 'DEV SL policy recommendation');
+            rec.triggerSource = 'dev_sl';
+            rec.trigger = {
+              ...rec.trigger,
+              sl: Number(sl.toFixed(2)),
+              contextLabel: ctxLabel,
+              shares,
+            };
+            rec.triggerNote = `DEV policy (sl=${sl.toFixed(2)}, ctx=${ctxLabel})`;
+            recommendation = rec;
+          } catch (e) {
+            console.error('DEV SL playlist fetch failed', e?.message || e);
+          }
+        } catch (e) {
+          console.warn('DEV SL path failed, falling back to rule-based', e?.message || e);
+        }
+      }
 
       // Check most specific conditions first
       // 1) Very high usage + stressed: calm/relaxing

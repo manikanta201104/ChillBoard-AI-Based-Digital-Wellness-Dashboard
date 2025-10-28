@@ -287,7 +287,8 @@ document.addEventListener('DOMContentLoaded', () => {
         controller.abort();
       }, 12000);
 
-      const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time', {
+      // const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time', {
+      const response = await fetch('http://localhost:5000/screen-time', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${jwt}` },
         signal: controller.signal
@@ -348,7 +349,8 @@ document.addEventListener('DOMContentLoaded', () => {
       let refreshToken = result.refreshToken;
 
       if (!refreshToken) {
-        const profileResponse = await fetch('https://chillboard-6uoj.onrender.com/auth/profile', {
+        // const profileResponse = await fetch('https://chillboard-6uoj.onrender.com/auth/profile', {
+        const profileResponse = await fetch('http://localhost:5000/auth/profile', {
           method: 'GET',
           headers: { 'Authorization': `Bearer ${result.jwt}` },
           signal: AbortSignal.timeout(5000)
@@ -364,7 +366,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-      const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time/refresh-token', {
+      // const response = await fetch('https://chillboard-6uoj.onrender.com/screen-time/refresh-token', {
+      const response = await fetch('http://localhost:5000/screen-time/refresh-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken }),
@@ -417,7 +420,8 @@ document.addEventListener('DOMContentLoaded', () => {
         controller.abort();
       }, 12000);
 
-      const response = await fetch('https://chillboard-6uoj.onrender.com/auth/login', {
+      // const response = await fetch('https://chillboard-6uoj.onrender.com/auth/login', {
+      const response = await fetch('http://localhost:5000/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
