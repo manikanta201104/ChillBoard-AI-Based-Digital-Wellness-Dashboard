@@ -6,8 +6,20 @@ import User from '../models/user.js';
 import { config } from '../config/env.js';
 import { authMiddleware } from '../middleware/auth.js';
 import Playlist from '../models/playlist.js';
+import PasswordReset from '../models/passwordReset.js';
+import { sendPasswordResetCode } from '../utils/mailer.js';
 
 const router = express.Router();
+
+// Helpers for password reset
+function generateSixDigitCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+function validatePasswordStrength(pw) {
+  // min 8 chars, at least 1 letter and 1 number
+  return typeof pw === 'string' && pw.length >= 8 && /[A-Za-z]/.test(pw) && /\d/.test(pw);
+}
 
 // POST /auth/signup
 router.post('/signup', async (req, res) => {
@@ -49,6 +61,132 @@ router.post('/signup', async (req, res) => {
   } catch (error) {
     logger.error('Error during signup:', error);
     res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /auth/forgot-password/request
+// Body: { email }
+router.post('/forgot-password/request', async (req, res) => {
+  const { email } = req.body || {};
+  if (!email || !/.+@.+\..+/.test(email)) {
+    return res.status(400).json({ message: 'Valid email is required' });
+  }
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      logger.warn('Password reset requested for unregistered email', { email });
+      return res.status(400).json({ message: 'Email is not registered.' });
+    }
+
+    const now = new Date();
+    let pr = await PasswordReset.findOne({ email });
+    if (!pr) {
+      pr = new PasswordReset({ email });
+    }
+
+    // Rate limiting: max 3 per hour, min 60s between sends
+    const ONE_MIN = 60 * 1000;
+    const ONE_HOUR = 60 * 60 * 1000;
+    if (pr.lastSentAt && now.getTime() - pr.lastSentAt.getTime() < ONE_MIN) {
+      return res.status(429).json({ message: 'Please wait before requesting another code.' });
+    }
+    if (pr.updatedAt && now.getTime() - pr.updatedAt.getTime() < ONE_HOUR && pr.requestCount >= 3) {
+      return res.status(429).json({ message: 'Too many requests. Try again later.' });
+    }
+
+    const code = generateSixDigitCode();
+    const salt = await bcrypt.genSalt(10);
+    const codeHash = await bcrypt.hash(code, salt);
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    pr.codeHash = codeHash;
+    pr.expiresAt = expiresAt;
+    pr.attempts = 0;
+    pr.lastSentAt = now;
+    // increment requestCount within 1 hour window, else reset
+    if (!pr.updatedAt || now.getTime() - pr.updatedAt.getTime() >= ONE_HOUR) {
+      pr.requestCount = 1;
+    } else {
+      pr.requestCount = (pr.requestCount || 0) + 1;
+    }
+    await pr.save();
+
+    await sendPasswordResetCode(email, code);
+    logger.info('Password reset code sent', { email });
+    return res.status(200).json({ message: 'A verification code has been sent to your email.' });
+  } catch (error) {
+    logger.error('Error in forgot-password/request', { error: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /auth/forgot-password/verify
+// Body: { email, code }
+router.post('/forgot-password/verify', async (req, res) => {
+  const { email, code } = req.body || {};
+  if (!email || !code) {
+    return res.status(400).json({ message: 'Email and code are required' });
+  }
+  try {
+    const pr = await PasswordReset.findOne({ email });
+    if (!pr) return res.status(400).json({ message: 'Invalid or expired code' });
+    if (pr.expiresAt < new Date()) {
+      return res.status(400).json({ message: 'Code expired' });
+    }
+    if (pr.attempts >= 5) {
+      return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
+    }
+    const ok = await bcrypt.compare(code, pr.codeHash);
+    pr.attempts = (pr.attempts || 0) + 1;
+    await pr.save();
+    if (!ok) {
+      return res.status(400).json({ message: 'Invalid code' });
+    }
+    return res.status(200).json({ message: 'Code verified. You may reset your password.' });
+  } catch (error) {
+    logger.error('Error in forgot-password/verify', { error: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+});
+
+// POST /auth/forgot-password/reset
+// Body: { email, code, newPassword }
+router.post('/forgot-password/reset', async (req, res) => {
+  const { email, code, newPassword } = req.body || {};
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ message: 'Email, code and newPassword are required' });
+  }
+  if (!validatePasswordStrength(newPassword)) {
+    return res.status(400).json({ message: 'Password must be at least 8 characters and include letters and numbers' });
+  }
+  try {
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: 'Email is not registered.' });
+    const pr = await PasswordReset.findOne({ email });
+    if (!pr) return res.status(400).json({ message: 'Invalid or expired code' });
+    if (pr.expiresAt < new Date()) {
+      await PasswordReset.deleteOne({ _id: pr._id }).catch(() => {});
+      return res.status(400).json({ message: 'Code expired' });
+    }
+    if (pr.attempts >= 5) {
+      return res.status(429).json({ message: 'Too many attempts. Request a new code.' });
+    }
+    const ok = await bcrypt.compare(code, pr.codeHash);
+    pr.attempts = (pr.attempts || 0) + 1;
+    await pr.save();
+    if (!ok) {
+      return res.status(400).json({ message: 'Invalid code' });
+    }
+
+    // Update password (pre-save hook will hash it)
+    user.password = newPassword;
+    await user.save();
+    await PasswordReset.deleteOne({ _id: pr._id }).catch(() => {});
+    logger.info('Password reset successful', { email });
+    return res.status(200).json({ message: 'Password has been updated successfully' });
+  } catch (error) {
+    logger.error('Error in forgot-password/reset', { error: error?.message, stack: error?.stack });
+    return res.status(500).json({ message: 'Internal server error' });
   }
 });
 

@@ -165,6 +165,13 @@ const AuthForm = ({ type, onSuccess }) => {
               )}
             </button>
           </div>
+          {type !== 'signup' && (
+            <div className="mt-2 text-right">
+              <a href="/forgot-password" className="text-sm text-slate-600 hover:text-slate-800 underline">
+                Forgot Password?
+              </a>
+            </div>
+          )}
         </div>
 
         {/* Error Display */}

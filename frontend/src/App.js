@@ -8,6 +8,7 @@ import About from './pages/About';
 import Navbar from './components/Navbar';
 import AdminDashboard from './pages/AdminDashboard.jsx';
 import Privacy from './pages/Privacy';
+import ForgotPassword from './pages/ForgotPassword.jsx';
 
 const ProtectedLayout = () => {
   // Check if user is authenticated (e.g., userId exists in localStorage)
@@ -36,6 +37,7 @@ function App() {
     <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route element={<ProtectedLayout />}>
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/challenges" element={<Challenges />} />

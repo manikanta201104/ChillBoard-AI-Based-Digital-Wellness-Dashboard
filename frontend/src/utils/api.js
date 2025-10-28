@@ -17,6 +17,22 @@ export const login = async userData => {
   return response.data;
 };
 
+// Forgot Password APIs (no auth required)
+export const forgotPasswordRequest = async (email) => {
+  const response = await api.post('/auth/forgot-password/request', { email });
+  return response.data; // expects { message }
+};
+
+export const forgotPasswordVerify = async (email, code) => {
+  const response = await api.post('/auth/forgot-password/verify', { email, code });
+  return response.data; // expects { message }
+};
+
+export const forgotPasswordReset = async (email, code, newPassword) => {
+  const response = await api.post('/auth/forgot-password/reset', { email, code, newPassword });
+  return response.data; // expects { message }
+};
+
 export const getScreenTime = async () => {
   const token = localStorage.getItem('jwt');
   if (!token) throw new Error('No token found');
