@@ -15,6 +15,7 @@ const secure = process.env.SMTP_SECURE === 'true' ? true : false; // true for 46
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
 let from = process.env.SMTP_FROM || 'ChillBoard <no-reply@localhost>';
+const enableDebug = process.env.SMTP_DEBUG === 'true';
 
 // Basic validation: allow "Name <email@domain>" or plain email
 const emailOnlyRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -44,6 +45,8 @@ export function getTransporter() {
       connectionTimeout: 15000, // 15s
       greetingTimeout: 15000,   // 15s
       socketTimeout: 20000,     // 20s
+      logger: enableDebug,
+      debug: enableDebug,
       tls: {
         rejectUnauthorized: false, // allows Gmail cert chain variations
       },
