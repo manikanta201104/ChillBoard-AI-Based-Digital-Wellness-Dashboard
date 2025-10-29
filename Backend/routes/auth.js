@@ -84,18 +84,28 @@ router.post('/forgot-password/request', async (req, res) => {
       pr = new PasswordReset({ email });
     }
 
-    // Rate limiting: max 3 per hour, min 60s between sends
+    // Rate limiting rules
     const ONE_MIN = 60 * 1000;
     const ONE_HOUR = 60 * 60 * 1000;
-    // Idempotent behavior: if a valid, unexpired code was sent very recently, don't 429 — just confirm
-    if (pr.expiresAt && pr.expiresAt > now && pr.lastSentAt && now.getTime() - pr.lastSentAt.getTime() < ONE_MIN) {
-      logger.info('Password reset code recently sent; returning idempotent success', { email });
+    const DEV = process.env.DEV_MODE === 'true';
+    const hasValidCode = pr.expiresAt && pr.expiresAt > now;
+    const lastSentAgo = pr.lastSentAt ? (now.getTime() - pr.lastSentAt.getTime()) : Number.POSITIVE_INFINITY;
+    const withinHour = pr.lastSentAt && lastSentAgo < ONE_HOUR;
+
+    // If a valid code already exists, be idempotent and return success without sending again
+    if (hasValidCode) {
+      logger.info('Valid password reset code already exists; returning success without resend', { email });
       return res.status(200).json({ message: 'A verification code has been sent to your email.' });
     }
-    if (pr.lastSentAt && now.getTime() - pr.lastSentAt.getTime() < ONE_MIN) {
-      return res.status(429).json({ message: 'Please wait before requesting another code.' });
+
+    // Enforce minimum 60s between actual sends; respond idempotently instead of 429
+    if (lastSentAgo < ONE_MIN) {
+      logger.info('Request within 60s window; returning idempotent success without resend', { email });
+      return res.status(200).json({ message: 'A verification code has been sent to your email.' });
     }
-    if (pr.updatedAt && now.getTime() - pr.updatedAt.getTime() < ONE_HOUR && pr.requestCount >= 3) {
+
+    // Enforce max 3 sends within a rolling 1 hour window based on lastSentAt (skip in DEV)
+    if (!DEV && withinHour && (pr.requestCount || 0) >= 3) {
       return res.status(429).json({ message: 'Too many requests. Try again later.' });
     }
 
@@ -108,8 +118,8 @@ router.post('/forgot-password/request', async (req, res) => {
     pr.expiresAt = expiresAt;
     pr.attempts = 0;
     pr.lastSentAt = now;
-    // increment requestCount within 1 hour window, else reset (only when we actually send)
-    if (!pr.updatedAt || now.getTime() - pr.updatedAt.getTime() >= ONE_HOUR) {
+    // increment requestCount within 1 hour window based on lastSentAt, else reset (only on actual send)
+    if (!withinHour) {
       pr.requestCount = 1;
     } else {
       pr.requestCount = (pr.requestCount || 0) + 1;
