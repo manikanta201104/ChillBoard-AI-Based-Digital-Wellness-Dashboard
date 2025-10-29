@@ -7,8 +7,7 @@ import { config } from '../config/env.js';
 import { authMiddleware } from '../middleware/auth.js';
 import Playlist from '../models/playlist.js';
 import PasswordReset from '../models/passwordReset.js';
-import { sendPasswordResetCode } from '../utils/mailer.js';
-import { sendPasswordResetCodeSES } from '../utils/sesMailer.js';
+import { sendPasswordResetCodeSES, sendPasswordResetCodeResend } from '../utils/sesMailer.js';
 
 const router = express.Router();
 
@@ -139,7 +138,7 @@ router.post('/forgot-password/request', async (req, res) => {
     }
     await pr.save();
 
-    // Try AWS SES (HTTPS) first, then fall back to SMTP/Resend chain
+    // Try AWS SES (HTTPS) first, then fall back to Resend HTTP API if configured
     sendPasswordResetCodeSES(email, code)
       .then((info) => {
         logger.info('Password reset email sent (SES)', {
@@ -150,18 +149,19 @@ router.post('/forgot-password/request', async (req, res) => {
         });
       })
       .catch(async (err) => {
-        logger.error('SES send failed, using fallback', { email, error: err?.message || String(err) });
-        try {
-          const info = await sendPasswordResetCode(email, code);
-          logger.info('Password reset email sent (fallback)', {
-            email,
-            messageId: info?.messageId,
-            accepted: info?.accepted,
-            rejected: info?.rejected,
-            response: info?.response,
-          });
-        } catch (e2) {
-          logger.error('All email sending methods failed', { email, error: e2?.message || String(e2) });
+        logger.error('SES send failed', { email, error: err?.message || String(err) });
+        if (process.env.RESEND_API_KEY) {
+          try {
+            const info = await sendPasswordResetCodeResend(email, code);
+            logger.info('Password reset email sent (Resend HTTP)', {
+              email,
+              messageId: info?.messageId,
+              accepted: info?.accepted,
+              response: info?.response,
+            });
+          } catch (e2) {
+            logger.error('Resend HTTP fallback failed', { email, error: e2?.message || String(e2) });
+          }
         }
       });
 

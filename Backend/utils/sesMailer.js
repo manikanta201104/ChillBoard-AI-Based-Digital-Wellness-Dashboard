@@ -21,7 +21,6 @@ export async function sendPasswordResetCodeSES(to, code) {
   </div>`;
 
   const client = getSESClient();
-
   const cmd = new SendEmailCommand({
     FromEmailAddress: sesFrom,
     Destination: { ToAddresses: [to] },
@@ -42,4 +41,33 @@ export async function sendPasswordResetCodeSES(to, code) {
     accepted: [to],
     response: 'Sent via AWS SES HTTPS API',
   };
+}
+
+export async function sendPasswordResetCodeResend(to, code) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error('RESEND_API_KEY missing');
+  const subject = 'Your ChillBoard password reset code';
+  const text = `Your one-time code is: ${code}. It expires in 10 minutes.`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5">
+    <h2>ChillBoard Password Reset</h2>
+    <p>Your one-time code is:</p>
+    <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
+    <p>This code expires in 10 minutes. If you did not request this, please ignore this email.</p>
+  </div>`;
+
+  const from = process.env.SES_FROM || 'no-reply@localhost';
+  const res = await globalThis.fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to, subject, text, html }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API error ${res.status}: ${body}`);
+  }
+  const data = await res.json();
+  return { messageId: data?.id, accepted: [to], response: 'Sent via Resend HTTP API' };
 }
