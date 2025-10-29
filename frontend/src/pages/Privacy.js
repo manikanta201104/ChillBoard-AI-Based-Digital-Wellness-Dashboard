@@ -161,7 +161,7 @@ const PrivacyPolicy = () => {
                 <li>
                   <strong>Mood Detection:</strong>
                   {' '}
-                  If enabled in the web app[](https://chillboard.vercel.app), your webcam is accessed locally with face-api.js. You must explicitly consent to webcam access, and processing occurs entirely in-browser.
+                  If enabled in the web app[](https://www.chillboard.in/), your webcam is accessed locally with face-api.js. You must explicitly consent to webcam access, and processing occurs entirely in-browser.
                 </li>
               </ul>
               <p className="text-slate-700 leading-relaxed mt-4">
@@ -224,7 +224,7 @@ const PrivacyPolicy = () => {
                     <li>
                       <strong>Cross-Device Sync:</strong>
                       {' '}
-                      Data is synced to allow viewing analytics and recommendations in the web dashboard[](https://chillboard.vercel.app).
+                      Data is synced to allow viewing analytics and recommendations in the web dashboard[](https://www.chillboard.in/).
                     </li>
                     <li>
                       <strong>Combination with Mood Data:</strong>
@@ -462,7 +462,7 @@ const PrivacyPolicy = () => {
             </div>
             <div className="p-6">
               <p className="text-slate-700 leading-relaxed">
-                We may update this Privacy Policy to reflect changes in our practices or legal requirements. The updated policy will be posted at https://chillboard.vercel.app/about, and the version number and effective date will be revised. We will notify users of significant changes via the Extension popup or email.
+                We may update this Privacy Policy to reflect changes in our practices or legal requirements. The updated policy will be posted at https://www.chillboard.in/about, and the version number and effective date will be revised. We will notify users of significant changes via the Extension popup or email.
               </p>
             </div>
           </div>
@@ -507,10 +507,10 @@ const PrivacyPolicy = () => {
                   <strong>Website:</strong>
                   {' '}
                   <a
-                    href="https://chillboard.vercel.app"
+                    href="https://www.chillboard.in/"
                     className="text-blue-600 hover:underline"
                   >
-                    https://chillboard.vercel.app
+                    https://www.chillboard.in/
                   </a>
                 </li>
                 <li>

@@ -142,7 +142,7 @@ router.get('/callback', async (req, res) => {
     );
 
     logger.info('Spotify tokens saved for player', { userId });
-    res.redirect('https://chillboard.vercel.app/dashboard');
+    res.redirect('https://www.chillboard.in/dashboard');
   } catch (err) {
     logger.error('Error in Spotify callback', { error: err.message, stack: err.stack });
     if (err.body && err.body.error === 'invalid_grant') {

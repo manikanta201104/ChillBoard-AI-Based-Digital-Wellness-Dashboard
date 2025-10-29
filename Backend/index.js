@@ -44,7 +44,7 @@ app.use(cors({
     // Allow these specific web origins
     const allowedOrigins = [
       'http://localhost:3000',
-      'https://chillboard.vercel.app',
+      'https://www.chillboard.in/',
       'https://chillboard-6uoj.onrender.com'
     ];
 

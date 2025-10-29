@@ -3,12 +3,19 @@
   "name": "ChillBoard Extension",
   "version": "1.7",
   "description": "Tracks screen time for ChillBoard wellness dashboard",
-  "permissions": ["storage", "tabs", "windows", "alarms", "idle", "webNavigation"],
+  "permissions": [
+    "storage",
+    "tabs",
+    "windows",
+    "alarms",
+    "idle",
+    "webNavigation"
+  ],
   "host_permissions": [
     "http://localhost:5000/*",
     "http://localhost:3000/*",
     "https://chillboard-6uoj.onrender.com/*",
-    "https://chillboard.vercel.app/"
+    "https://www.chillboard.in/"
   ],
   "background": {
     "service_worker": "background.js"

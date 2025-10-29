@@ -752,7 +752,7 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     sendResponse({ status: 'success', isTracking, currentTabUrl });
     return true;
   } else if (request.action === 'openWebApp') {
-    chrome.tabs.create({ url: 'https://chillboard.vercel.app/' });
+    chrome.tabs.create({ url: 'https://www.chillboard.in/' });
     sendResponse({ success: true });
     return true;
   } else if (request.action === 'logout') {
