@@ -14,7 +14,19 @@ const port = Number(process.env.SMTP_PORT || 587);
 const secure = process.env.SMTP_SECURE === 'true' ? true : false; // true for 465, false for 587
 const user = process.env.SMTP_USER;
 const pass = process.env.SMTP_PASS;
-const from = process.env.SMTP_FROM || 'ChillBoard <no-reply@localhost>';
+let from = process.env.SMTP_FROM || 'ChillBoard <no-reply@localhost>';
+
+// Basic validation: allow "Name <email@domain>" or plain email
+const emailOnlyRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const displayEmailRe = /^.+\s<[^\s@]+@[^\s@]+\.[^\s@]+>$/;
+if (!(emailOnlyRe.test(from) || displayEmailRe.test(from))) {
+  // Fallback to authenticated user which Gmail allows by default
+  if (emailOnlyRe.test(user)) {
+    from = user;
+  } else {
+    from = 'no-reply@localhost';
+  }
+}
 
 let transporter = null;
 
@@ -49,6 +61,7 @@ export async function sendPasswordResetCode(to, code) {
     <p>This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>
   </div>`;
   
+  // Let errors bubble up so route can decide how much detail to expose
   await t.sendMail({ from, to, subject, text, html });
 }
 
