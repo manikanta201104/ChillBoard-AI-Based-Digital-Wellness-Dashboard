@@ -28,12 +28,17 @@ export function getTransporter() {
       port,
       secure,
       auth: { user, pass },
+      tls: {
+    rejectUnauthorized: false, // allows self-signed or Gmail certs
+  },
     });
   }
   return transporter;
 }
 
 export async function sendPasswordResetCode(to, code) {
+  if (!to || !code) throw new Error('Missing email or code');
+  
   const t = getTransporter();
   const subject = 'Your ChillBoard password reset code';
   const text = `Your one-time code is: ${code}. It expires in 10 minutes.`;
@@ -43,5 +48,7 @@ export async function sendPasswordResetCode(to, code) {
     <p style="font-size:24px;font-weight:bold;letter-spacing:4px">${code}</p>
     <p>This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>
   </div>`;
+  
   await t.sendMail({ from, to, subject, text, html });
 }
+
