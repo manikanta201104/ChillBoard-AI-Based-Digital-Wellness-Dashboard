@@ -87,6 +87,11 @@ router.post('/forgot-password/request', async (req, res) => {
     // Rate limiting: max 3 per hour, min 60s between sends
     const ONE_MIN = 60 * 1000;
     const ONE_HOUR = 60 * 60 * 1000;
+    // Idempotent behavior: if a valid, unexpired code was sent very recently, don't 429 — just confirm
+    if (pr.expiresAt && pr.expiresAt > now && pr.lastSentAt && now.getTime() - pr.lastSentAt.getTime() < ONE_MIN) {
+      logger.info('Password reset code recently sent; returning idempotent success', { email });
+      return res.status(200).json({ message: 'A verification code has been sent to your email.' });
+    }
     if (pr.lastSentAt && now.getTime() - pr.lastSentAt.getTime() < ONE_MIN) {
       return res.status(429).json({ message: 'Please wait before requesting another code.' });
     }
@@ -103,7 +108,7 @@ router.post('/forgot-password/request', async (req, res) => {
     pr.expiresAt = expiresAt;
     pr.attempts = 0;
     pr.lastSentAt = now;
-    // increment requestCount within 1 hour window, else reset
+    // increment requestCount within 1 hour window, else reset (only when we actually send)
     if (!pr.updatedAt || now.getTime() - pr.updatedAt.getTime() >= ONE_HOUR) {
       pr.requestCount = 1;
     } else {
