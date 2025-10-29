@@ -40,9 +40,13 @@ export function getTransporter() {
       port,
       secure,
       auth: { user, pass },
+      // Timeouts to prevent very long hangs
+      connectionTimeout: 15000, // 15s
+      greetingTimeout: 15000,   // 15s
+      socketTimeout: 20000,     // 20s
       tls: {
-    rejectUnauthorized: false, // allows self-signed or Gmail certs
-  },
+        rejectUnauthorized: false, // allows Gmail cert chain variations
+      },
     });
   }
   return transporter;
@@ -61,7 +65,7 @@ export async function sendPasswordResetCode(to, code) {
     <p>This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>
   </div>`;
   
-  // Let errors bubble up so route can decide how much detail to expose
-  await t.sendMail({ from, to, subject, text, html });
+  // Return info so caller can log messageId/accepted/rejected
+  return t.sendMail({ from, to, subject, text, html });
 }
 

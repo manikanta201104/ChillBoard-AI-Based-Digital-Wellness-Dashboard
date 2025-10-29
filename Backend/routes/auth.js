@@ -138,8 +138,20 @@ router.post('/forgot-password/request', async (req, res) => {
     }
     await pr.save();
 
-    await sendPasswordResetCode(email, code);
-    logger.info('Password reset code sent', { email });
+    sendPasswordResetCode(email, code)
+      .then((info) => {
+        logger.info('Password reset code sent', {
+          email,
+          messageId: info?.messageId,
+          accepted: info?.accepted,
+          rejected: info?.rejected,
+          response: info?.response,
+        });
+      })
+      .catch((err) => {
+        logger.error('Failed to send password reset email', { email, error: err?.message || String(err) });
+      });
+
     return res.status(200).json({ message: 'A verification code has been sent to your email.' });
   } catch (error) {
     logger.error('Error in forgot-password/request', { error: error?.message, stack: error?.stack });
