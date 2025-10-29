@@ -106,7 +106,19 @@ router.post('/forgot-password/request', async (req, res) => {
 
     // Enforce max 3 sends within a rolling 1 hour window based on lastSentAt (skip in DEV)
     if (!DEV && withinHour && (pr.requestCount || 0) >= 3) {
-      return res.status(429).json({ message: 'Too many requests. Try again later.' });
+      const msRemaining = ONE_HOUR - lastSentAgo;
+      const minutesUntilNext = Math.max(1, Math.ceil(msRemaining / 60000));
+      logger.warn('Password reset rate-limit hit', {
+        email,
+        requestCount: pr.requestCount || 0,
+        minutesUntilNext,
+      });
+      return res.status(429).json({
+        message: 'Too many requests. Try again later.',
+        minutesUntilNext,
+        requestsUsed: pr.requestCount || 0,
+        limit: 3,
+      });
     }
 
     const code = generateSixDigitCode();
