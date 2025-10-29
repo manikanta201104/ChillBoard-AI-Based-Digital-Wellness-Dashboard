@@ -8,6 +8,7 @@ import { authMiddleware } from '../middleware/auth.js';
 import Playlist from '../models/playlist.js';
 import PasswordReset from '../models/passwordReset.js';
 import { sendPasswordResetCode } from '../utils/mailer.js';
+import { sendPasswordResetCodeSES } from '../utils/sesMailer.js';
 
 const router = express.Router();
 
@@ -138,18 +139,30 @@ router.post('/forgot-password/request', async (req, res) => {
     }
     await pr.save();
 
-    sendPasswordResetCode(email, code)
+    // Try AWS SES (HTTPS) first, then fall back to SMTP/Resend chain
+    sendPasswordResetCodeSES(email, code)
       .then((info) => {
-        logger.info('Password reset code sent', {
+        logger.info('Password reset email sent (SES)', {
           email,
           messageId: info?.messageId,
           accepted: info?.accepted,
-          rejected: info?.rejected,
           response: info?.response,
         });
       })
-      .catch((err) => {
-        logger.error('Failed to send password reset email', { email, error: err?.message || String(err) });
+      .catch(async (err) => {
+        logger.error('SES send failed, using fallback', { email, error: err?.message || String(err) });
+        try {
+          const info = await sendPasswordResetCode(email, code);
+          logger.info('Password reset email sent (fallback)', {
+            email,
+            messageId: info?.messageId,
+            accepted: info?.accepted,
+            rejected: info?.rejected,
+            response: info?.response,
+          });
+        } catch (e2) {
+          logger.error('All email sending methods failed', { email, error: e2?.message || String(e2) });
+        }
       });
 
     return res.status(200).json({ message: 'A verification code has been sent to your email.' });

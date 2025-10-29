@@ -55,6 +55,43 @@ export function getTransporter() {
   return transporter;
 }
 
+function createAltTransporter() {
+  if (!host || !user || !pass) {
+    throw new Error('SMTP is not configured. Missing SMTP_HOST/SMTP_USER/SMTP_PASS');
+  }
+  // Alternative SMTP attempt: port 465 with secure=true
+  return nodemailer.createTransport({
+    host,
+    port: 465,
+    secure: true,
+    auth: { user, pass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
+    logger: enableDebug,
+    debug: enableDebug,
+    tls: { rejectUnauthorized: false },
+  });
+}
+
+async function sendViaResend(to, subject, text, html) {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error('RESEND_API_KEY missing');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${key}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ from, to, subject, text, html }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`Resend API error ${res.status}: ${body}`);
+  }
+  return res.json();
+}
+
 export async function sendPasswordResetCode(to, code) {
   if (!to || !code) throw new Error('Missing email or code');
   
@@ -68,7 +105,28 @@ export async function sendPasswordResetCode(to, code) {
     <p>This code expires in 10 minutes. If you did not request this, you can safely ignore this email.</p>
   </div>`;
   
-  // Return info so caller can log messageId/accepted/rejected
-  return t.sendMail({ from, to, subject, text, html });
+  try {
+    // Primary SMTP send (587)
+    return await t.sendMail({ from, to, subject, text, html });
+  } catch (err) {
+    const msg = (err && err.message) || String(err);
+    // Retry with alternative SMTP settings if connection-related
+    if (/timeout|ECONNECTION|ETIMEDOUT|ENOTFOUND|ECONNRESET/i.test(msg)) {
+      try {
+        const alt = createAltTransporter();
+        const info = await alt.sendMail({ from, to, subject, text, html });
+        return info;
+      } catch (err2) {
+        // Fall through to HTTP provider if configured
+        if (process.env.RESEND_API_KEY) {
+          const info = await sendViaResend(to, subject, text, html);
+          return { messageId: info?.id, accepted: [to], rejected: [], response: 'Sent via Resend API' };
+        }
+        throw err2;
+      }
+    }
+    // For non-connection errors, bubble up
+    throw err;
+  }
 }
 
