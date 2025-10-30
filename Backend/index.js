@@ -45,6 +45,7 @@ app.use(cors({
     const allowedOrigins = [
       'http://localhost:3000',
       'https://www.chillboard.in',
+      'https://chillboard.in',
       'https://chillboard-6uoj.onrender.com'
     ];
 
@@ -56,7 +57,8 @@ app.use(cors({
     return callback(new Error('Not allowed by CORS'));
   },
   methods: ['GET', 'POST', 'PATCH', 'OPTIONS', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  // Broaden allowed headers to prevent preflight failures from common client headers
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'Origin', 'X-Requested-With'],
   credentials: true
 }));
 
