@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { sendContactMessage } from "../utils/api";
+import SEO from "../components/SEO";
 
 const About = () => {
   const [formData, setFormData] = useState({ name: '', email: '', message: '' });
@@ -29,6 +30,14 @@ const About = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
+      <SEO
+        title="About ChillBoard — Digital Wellness, Privacy, and Support"
+        description="Learn about ChillBoard's mission to improve digital wellness with private mood detection, screen time analytics, and Spotify recommendations. Contact our team."
+        url="https://www.chillboard.in/about"
+        canonical="https://www.chillboard.in/about"
+        keywords="about ChillBoard, digital wellness mission, privacy policy, contact ChillBoard"
+      />
+
       <div className="max-w-5xl mx-auto">
         {/* Header Section */}
         <div className="text-center mb-12">

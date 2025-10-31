@@ -4,6 +4,7 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import { getApprovedReviews } from '../utils/api';
 import ReviewForm from '../components/ReviewForm';
+import SEO from '../components/SEO';
 
 const Landing = () => {
   const [showForm, setShowForm] = useState(null);
@@ -31,6 +32,14 @@ const Landing = () => {
 
   return (
     <div className="min-h-screen bg-slate-50 relative overflow-hidden">
+      <SEO
+        title="ChillBoard — Track Screen Time, Mood, and Wellness"
+        description="Track screen time, monitor mood locally with AI, and get personalized Spotify recommendations. Start your digital wellness journey."
+        url="https://www.chillboard.in/"
+        canonical="https://www.chillboard.in/"
+        keywords="track screen time, mood dashboard, digital wellness, AI mood detection, Spotify recommendations, productivity app"
+        image="/logo512.png"
+      />
       {/* Background Pattern */}
       <div className="absolute inset-0 bg-gradient-to-br from-slate-100 to-slate-200 opacity-50"></div>
       <div className="absolute inset-0">

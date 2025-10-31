@@ -1,8 +1,16 @@
 import React from 'react';
+import SEO from '../components/SEO';
 
 const PrivacyPolicy = () => {
   return (
     <div className="min-h-screen bg-slate-50 p-6">
+      <SEO
+        title="ChillBoard Privacy Policy — Local Mood Detection and Data Minimization"
+        description="Read how ChillBoard protects your privacy: local mood detection, hostname-only tracking, secure storage, and user controls."
+        url="https://www.chillboard.in/privacy"
+        canonical="https://www.chillboard.in/privacy"
+        keywords="ChillBoard privacy policy, local mood detection, data minimization, screen time privacy"
+      />
       <div className="max-w-5xl mx-auto">
         <div className="text-center mb-12">
           <h1 className="text-3xl font-bold text-slate-700 mb-4">
