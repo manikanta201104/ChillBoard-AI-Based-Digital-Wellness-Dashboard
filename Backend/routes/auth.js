@@ -7,7 +7,7 @@ import { config } from '../config/env.js';
 import { authMiddleware } from '../middleware/auth.js';
 import Playlist from '../models/playlist.js';
 import PasswordReset from '../models/passwordReset.js';
-import { sendPasswordResetCodeSES, sendPasswordResetCodeResend } from '../utils/sesMailer.js';
+import { sendPasswordResetWithFallback } from '../utils/sesMailer.js';
 
 const router = express.Router();
 
@@ -138,31 +138,18 @@ router.post('/forgot-password/request', async (req, res) => {
     }
     await pr.save();
 
-    // Try AWS SES (HTTPS) first, then fall back to Resend HTTP API if configured
-    sendPasswordResetCodeSES(email, code)
+    // Use unified multi-provider sender (SES -> Resend -> Brevo)
+    sendPasswordResetWithFallback(email, code)
       .then((info) => {
-        logger.info('Password reset email sent (SES)', {
+        logger.info('Password reset email sent', {
           email,
           messageId: info?.messageId,
           accepted: info?.accepted,
           response: info?.response,
         });
       })
-      .catch(async (err) => {
-        logger.error('SES send failed', { email, error: err?.message || String(err) });
-        if (process.env.RESEND_API_KEY) {
-          try {
-            const info = await sendPasswordResetCodeResend(email, code);
-            logger.info('Password reset email sent (Resend HTTP)', {
-              email,
-              messageId: info?.messageId,
-              accepted: info?.accepted,
-              response: info?.response,
-            });
-          } catch (e2) {
-            logger.error('Resend HTTP fallback failed', { email, error: e2?.message || String(e2) });
-          }
-        }
+      .catch((err) => {
+        logger.error('All email providers failed', { email, error: err?.message || String(err) });
       });
 
     return res.status(200).json({ message: 'A verification code has been sent to your email.' });
