@@ -92,11 +92,7 @@ router.post('/forgot-password/request', async (req, res) => {
     const lastSentAgo = pr.lastSentAt ? (now.getTime() - pr.lastSentAt.getTime()) : Number.POSITIVE_INFINITY;
     const withinHour = pr.lastSentAt && lastSentAgo < ONE_HOUR;
 
-    // If a valid code already exists, be idempotent and return success without sending again
-    if (hasValidCode) {
-      logger.info('Valid password reset code already exists; returning success without resend', { email });
-      return res.status(200).json({ message: 'A verification code has been sent to your email.' });
-    }
+    // Even if a valid code exists, we will resend (generate a fresh code) subject to throttling and limits
 
     // Enforce minimum 60s between actual sends; respond idempotently instead of 429
     if (lastSentAgo < ONE_MIN) {
