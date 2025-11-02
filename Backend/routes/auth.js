@@ -7,7 +7,7 @@ import { config } from '../config/env.js';
 import { authMiddleware } from '../middleware/auth.js';
 import Playlist from '../models/playlist.js';
 import PasswordReset from '../models/passwordReset.js';
-import { sendPasswordResetWithFallback } from '../utils/sesMailer.js';
+import { sendPasswordResetCodeBrevo } from '../utils/sesMailer.js';
 
 const router = express.Router();
 
@@ -138,10 +138,10 @@ router.post('/forgot-password/request', async (req, res) => {
     }
     await pr.save();
 
-    // Use unified multi-provider sender (SES -> Resend -> Brevo)
-    sendPasswordResetWithFallback(email, code)
+    // Use Brevo only (for verification)
+    sendPasswordResetCodeBrevo(email, code)
       .then((info) => {
-        logger.info('Password reset email sent', {
+        logger.info('Password reset email sent (Brevo)', {
           email,
           messageId: info?.messageId,
           accepted: info?.accepted,
@@ -149,7 +149,7 @@ router.post('/forgot-password/request', async (req, res) => {
         });
       })
       .catch((err) => {
-        logger.error('All email providers failed', { email, error: err?.message || String(err) });
+        logger.error('Brevo send failed', { email, error: err?.message || String(err) });
       });
 
     return res.status(200).json({ message: 'A verification code has been sent to your email.' });
