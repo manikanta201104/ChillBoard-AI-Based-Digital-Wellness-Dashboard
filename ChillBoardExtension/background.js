@@ -21,6 +21,7 @@ let isSystemIdle = false; // Track system idle state
 let isMediaActive = false; // Track if media is playing in the current tab
 let isAuthenticated = false; // NEW: Track whether a valid JWT is present
 let hasInitialized = false; // NEW: ensure initializeStorage only runs once per activation
+let refreshTimerId = null; // NEW: schedule proactive JWT refresh
 
 console.log('Service worker started');
 
@@ -179,6 +180,16 @@ function initializeStorage() {
     if (token) {
       const decoded = jwtDecode(token);
       isAuthenticated = !!decoded && (!decoded.exp || decoded.exp * 1000 > Date.now());
+      // Proactively schedule refresh or try immediate refresh if expired
+      if (isAuthenticated) {
+        scheduleTokenRefresh(token);
+      } else {
+        const newJwt = await refreshJwt();
+        if (newJwt) {
+          isAuthenticated = true;
+          scheduleTokenRefresh(newJwt);
+        }
+      }
     } else {
       isAuthenticated = false;
     }
@@ -772,7 +783,8 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     }
     await clearStorageData([
       'totalTime', 'tabUsage', 'lastSyncedTotalTime', 'lastSyncedTabUsage',
-      'currentTabId', 'currentTabUrl', 'tabStartTime', 'isTracking', 'lastSyncDate', 'offlineQueue'
+      'currentTabId', 'currentTabUrl', 'tabStartTime', 'isTracking', 'lastSyncDate', 'offlineQueue',
+      'jwt', 'refreshToken'
     ]);
     notifyUser('Logged out successfully', 'success');
     sendResponse({ success: true });
@@ -783,9 +795,13 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     if (jwt) {
       const decoded = jwtDecode(jwt);
       isAuthenticated = !!decoded && (!decoded.exp || decoded.exp * 1000 > Date.now());
+      // (Re)schedule proactive refresh when auth updates
+      scheduleTokenRefresh(jwt);
     } else {
       isAuthenticated = false;
+      if (refreshTimerId) { clearTimeout(refreshTimerId); refreshTimerId = null; }
     }
+
     if (!isAuthenticated) stopTracking();
     sendResponse({ success: true, isAuthenticated });
     return true;

@@ -109,7 +109,7 @@ router.post('/join', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'User already joined this challenge' });
     }
 
-    challenge.participants.push({ userId, reduction: 0, lastUpdate: now.getTime() });
+    challenge.participants.push({ userId, reduction: 0, lastUpdate: now.getTime(), joinedAt: now.getTime() });
     await challenge.save();
 
     logger.info('User joined challenge', { challengeId, userId });
@@ -147,76 +147,54 @@ router.post('/progress', authMiddleware, async (req, res) => {
       return res.status(400).json({ message: 'Challenge is not active' });
     }
 
-    const baselineStart = new Date(challenge.startDate.getTime() - 7 * 24 * 60 * 60 * 1000);
-    const baselineEnd = new Date(challenge.startDate.getTime() - 1 * 24 * 60 * 60 * 1000);
-    const startOfBaselineStart = new Date(baselineStart.toISOString().split('T')[0]);
-    const startOfBaselineEnd = new Date(new Date(baselineEnd.toISOString().split('T')[0]).getTime() + 86399999);
-
-    const baselineData = await ScreenTime.aggregate([
-      {
-        $match: {
-          userId,
-          date: { $gte: startOfBaselineStart, $lte: startOfBaselineEnd },
-        },
-      },
-      {
-        $group: {
-          _id: null,
-          avgTotalTime: { $avg: '$totalTime' },
-          count: { $sum: 1 },
-        },
-      },
-    ]).catch(err => {
-      logger.error('Aggregation error for baseline data', { error: err.message, stack: err.stack });
-      return [];
-    });
-
-    let baselineTotalTime;
-    if (!baselineData.length || baselineData[0].count < 7) {
-      logger.info('Insufficient baseline data, using earliest challenge day as baseline', { userId });
-      const firstDayData = await ScreenTime.findOne({ 
-        userId, 
-        date: { $gte: challenge.startDate, $lte: new Date(challenge.startDate.getTime() + challenge.duration * 24 * 60 * 60 * 1000) } 
-      }).sort({ date: 1 });
-      baselineTotalTime = firstDayData ? firstDayData.totalTime : 0;
-      if (!firstDayData) {
-        logger.warn('No screen time data available in challenge period, skipping update', { userId });
-        return res.status(200).json({ message: 'No screen time data available, update skipped' });
-      }
-    } else {
-      baselineTotalTime = baselineData[0].avgTotalTime;
-    }
-
+    // Day-over-day reduction model anchored to participant join date
+    const anchorDate = new Date(Math.max(challenge.startDate.getTime(), participant.joinedAt || challenge.startDate.getTime()));
     const currentDay = new Date(now.toISOString().split('T')[0]);
-    let currentData = await ScreenTime.findOne({ userId, date: currentDay });
-    if (!currentData) {
-      currentData = await ScreenTime.findOne({ 
-        userId, 
-        date: { $lt: currentDay, $gte: challenge.startDate } 
-      }).sort({ date: -1 });
+    const yesterdayDay = new Date(currentDay.getTime() - 24 * 60 * 60 * 1000);
+
+    // Prevent multiple updates in the same day (unless manualTrigger explicitly set to true)
+    const lastUpdateDay = new Date(new Date(participant.lastUpdate).toISOString().split('T')[0]);
+    if (!manualTrigger && lastUpdateDay.getTime() === currentDay.getTime()) {
+      logger.info('Progress update skipped, already updated today', { challengeId, userId, lastUpdate: participant.lastUpdate });
+      return res.status(204).send('Already updated today');
     }
 
-    const currentTotalTime = currentData ? currentData.totalTime : baselineTotalTime;
+    // If yesterday is before anchor, we do not compute a delta yet (first day)
+    if (yesterdayDay < new Date(anchorDate.toISOString().split('T')[0])) {
+      logger.info('First day since join; no reduction computed', { challengeId, userId });
+      return res.status(200).json({ message: 'First day since join; no reduction computed' });
+    }
 
-    const dailyReduction = Math.min(
-      challenge.goal / 60,
-      Math.max(0, (baselineTotalTime - currentTotalTime) / 3600)
+    const todayDoc = await ScreenTime.findOne({ userId, date: currentDay });
+    const yesterdayDoc = await ScreenTime.findOne({ userId, date: yesterdayDay });
+
+    // If data missing for today or yesterday, skip to keep stability
+    if (!todayDoc || !yesterdayDoc) {
+      logger.info('Insufficient day-over-day data, skipping update', { challengeId, userId, hasToday: !!todayDoc, hasYesterday: !!yesterdayDoc });
+      return res.status(200).json({ message: 'Insufficient data for day-over-day update' });
+    }
+
+    const deltaHours = Math.max(0, (yesterdayDoc.totalTime - todayDoc.totalTime) / 3600);
+    const perDayCapHours = challenge.goal / 60; // goal is in minutes per day
+    const dailyReduction = Math.min(deltaHours, perDayCapHours);
+
+    const totalReductionHours = Math.min(
+      (participant.reduction / 3600) + dailyReduction,
+      perDayCapHours * challenge.duration
     );
-    const totalReduction = (participant.reduction / 3600) + dailyReduction;
-    const maxReduction = (challenge.goal / 60) * challenge.duration;
-    const newReduction = Math.min(totalReduction, maxReduction) * 3600;
+    const newReduction = totalReductionHours * 3600;
 
-    if (now.getTime() - participant.lastUpdate >= 3600000 || manualTrigger) {
+    if (now.getTime() - participant.lastUpdate >= 3600000 || manualTrigger || lastUpdateDay.getTime() !== currentDay.getTime()) {
       const updatedChallenge = await Challenge.findOneAndUpdate(
         { challengeId, 'participants.userId': userId },
         { $set: { 'participants.$.reduction': newReduction, 'participants.$.lastUpdate': now.getTime() } },
         { new: true, runValidators: true }
       );
       if (!updatedChallenge) throw new Error('Failed to update participant');
-      logger.info('Progress updated', { challengeId, userId, reduction: newReduction / 3600, timestamp: now });
+      logger.info('Progress updated (day-over-day)', { challengeId, userId, addedHours: dailyReduction, totalHours: totalReductionHours, timestamp: now });
       res.status(200).json({
-        message: 'Progress updated',
-        reduction: newReduction / 3600,
+        message: 'Progress updated (day-over-day)',
+        reduction: totalReductionHours,
       });
     } else {
       logger.info('Progress update skipped, within 1-hour interval', { challengeId, userId, lastUpdate: participant.lastUpdate, now: now.getTime() });
@@ -304,67 +282,44 @@ cron.schedule('0 0 * * *', async () => {
         const userId = participant.userId;
         const challengeId = challenge.challengeId;
 
-        const baselineStart = new Date(challenge.startDate.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const baselineEnd = new Date(challenge.startDate.getTime() - 1 * 24 * 60 * 60 * 1000);
-        const startOfBaselineStart = new Date(baselineStart.toISOString().split('T')[0]);
-        const startOfBaselineEnd = new Date(new Date(baselineEnd.toISOString().split('T')[0]).getTime() + 86399999);
-
-        const baselineData = await ScreenTime.aggregate([
-          { $match: { userId, date: { $gte: startOfBaselineStart, $lte: startOfBaselineEnd } } },
-          { $group: { _id: null, avgTotalTime: { $avg: '$totalTime' }, count: { $sum: 1 } } },
-        ]);
-
-        let baselineTotalTime;
-        if (!baselineData.length || baselineData[0].count < 7) {
-          const firstDayData = await ScreenTime.findOne({ 
-            userId, 
-            date: { $gte: challenge.startDate, $lte: challengeEnd } 
-          }).sort({ date: 1 });
-          baselineTotalTime = firstDayData ? firstDayData.totalTime : 0;
-          if (!firstDayData) {
-            logger.warn('No screen time data in challenge period, skipping update', { userId, challengeId });
-            continue;
-          }
-          logger.info('Using earliest challenge day as baseline', { userId, challengeId, date: firstDayData.date });
-        } else {
-          baselineTotalTime = baselineData[0].avgTotalTime;
-          logger.info('Using baseline average', { userId, challengeId, avgTotalTime: baselineTotalTime });
-        }
-
+        // Day-over-day calculation (IST midnight triggered)
+        const anchorDate = new Date(Math.max(challenge.startDate.getTime(), participant.joinedAt || challenge.startDate.getTime()));
         const currentDay = new Date(now.toISOString().split('T')[0]);
-        let currentData = await ScreenTime.findOne({ userId, date: currentDay });
-        if (!currentData) {
-          currentData = await ScreenTime.findOne({ 
-            userId, 
-            date: { $lt: currentDay, $gte: challenge.startDate } 
-          }).sort({ date: -1 });
-          if (!currentData) {
-            logger.warn('No recent screen time data, using baseline', { userId, challengeId });
-          }
+        const yesterdayDay = new Date(currentDay.getTime() - 24 * 60 * 60 * 1000);
+
+        if (yesterdayDay < new Date(anchorDate.toISOString().split('T')[0])) {
+          logger.info('First day since join; no reduction computed (cron)', { challengeId, userId });
+          continue;
         }
 
-        const currentTotalTime = currentData ? currentData.totalTime : baselineTotalTime;
-        const dailyReduction = Math.min(
-          challenge.goal / 60,
-          Math.max(0, (baselineTotalTime - currentTotalTime) / 3600)
+        const todayDoc = await ScreenTime.findOne({ userId, date: currentDay });
+        const yesterdayDoc = await ScreenTime.findOne({ userId, date: yesterdayDay });
+        if (!todayDoc || !yesterdayDoc) {
+          logger.info('Insufficient day-over-day data (cron), skipping', { challengeId, userId, hasToday: !!todayDoc, hasYesterday: !!yesterdayDoc });
+          continue;
+        }
+
+        const deltaHours = Math.max(0, (yesterdayDoc.totalTime - todayDoc.totalTime) / 3600);
+        const perDayCapHours = challenge.goal / 60;
+        const dailyReduction = Math.min(deltaHours, perDayCapHours);
+        const totalReductionHours = Math.min(
+          (participant.reduction / 3600) + dailyReduction,
+          perDayCapHours * challenge.duration
         );
-        const totalReduction = (participant.reduction / 3600) + dailyReduction;
-        const maxReduction = (challenge.goal / 60) * challenge.duration;
-        const newReduction = Math.min(totalReduction, maxReduction) * 3600;
+        const newReduction = totalReductionHours * 3600;
 
         await Challenge.findOneAndUpdate(
           { challengeId, 'participants.userId': userId },
           { $set: { 'participants.$.reduction': newReduction, 'participants.$.lastUpdate': now.getTime() } },
           { new: true, runValidators: true }
         );
-        logger.info('Daily progress updated', { 
+        logger.info('Daily progress updated (day-over-day)', { 
           challengeId, 
           userId, 
-          reduction: newReduction / 3600, 
+          addedHours: dailyReduction, 
+          totalHours: totalReductionHours, 
           timestamp: now,
           currentDate: currentDay,
-          currentTotalTime,
-          baselineTotalTime
         });
       }
     }
@@ -372,8 +327,6 @@ cron.schedule('0 0 * * *', async () => {
   } catch (err) {
     logger.error('Error in daily progress update', { error: err.message, stack: err.stack });
   }
-}, {
-  timezone: 'Asia/Kolkata',
-});
+}, { timezone: 'Asia/Kolkata' });
 
 export default router;

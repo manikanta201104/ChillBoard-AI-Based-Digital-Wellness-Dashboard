@@ -1,6 +1,7 @@
 /*global chrome */
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+
 import { Bar, Pie } from 'react-chartjs-2';
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale } from 'chart.js';
 import { ToastContainer, toast } from 'react-toastify';
@@ -33,6 +34,7 @@ const Dashboard = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('last7days');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
+  const hasFetchedRecOnceRef = useRef(false);
 
   const showToast = (message, type = 'success') => {
     const options = {
@@ -54,9 +56,14 @@ const Dashboard = () => {
     try {
       const updatedRecommendations = await getRecommendations();
       setRecommendations(updatedRecommendations);
+      if (updatedRecommendations && updatedRecommendations.length > 0) {
+        hasFetchedRecOnceRef.current = true;
+      }
     } catch (err) {
-      setError('Failed to fetch recommendations');
-      showToast('Failed to fetch recommendations', 'error');
+      setError(prev => prev || '');
+      if (hasFetchedRecOnceRef.current) {
+        showToast('Failed to fetch recommendations', 'error');
+      }
       console.error('Recommendation fetch error:', err);
     }
   }, []);
@@ -71,10 +78,12 @@ const Dashboard = () => {
         ]);
         setScreenTimeData(screenTimeData.sort((a, b) => new Date(b.date) - new Date(a.date)));
         setRecommendations(recData);
+        if (recData && recData.length > 0) {
+          hasFetchedRecOnceRef.current = true;
+        }
         await fetchLeaderboard();
       } catch (err) {
         setError(err.message || 'Failed to fetch data');
-        showToast(err.message || 'Failed to fetch data', 'error');
       }
     };
 
@@ -89,6 +98,21 @@ const Dashboard = () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (updateIntervalRef.current) clearInterval(updateIntervalRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    const messages = [
+      'Stay consistent: a 2‑minute stretch can reset your focus.',
+      'Hydrate and breathe: 10 deep breaths can boost clarity.',
+      'Short walk, big impact: take 10 minutes to refresh.',
+      'Protect your eyes: 20‑20‑20 rule for healthy screens.',
+      'Celebrate progress, not perfection. You got this!'
+    ];
+    const id = setInterval(() => {
+      const msg = messages[Math.floor(Math.random() * messages.length)];
+      toast.info(msg, { position: 'top-right', autoClose: 5000 });
+    }, 60 * 60 * 1000); // every hour
+    return () => clearInterval(id);
   }, []);
 
   const fetchLeaderboard = async () => {
@@ -134,6 +158,7 @@ const Dashboard = () => {
   };
 
   const handleRecommendationAction = async (recommendationId, accepted) => {
+
     try {
       await updateRecommendation(recommendationId, accepted);
       setActionStatus(accepted ? 'accepted' : 'declined');
@@ -143,21 +168,42 @@ const Dashboard = () => {
 
       const latestRec = updatedRecommendations.find(rec => rec.recommendationId === recommendationId);
       if (accepted && latestRec) {
-        const details = JSON.parse(latestRec.details || '{}');
+        let parsedDetails;
+        try { parsedDetails = JSON.parse(latestRec.details || '{}'); } catch (_) { parsedDetails = {}; }
         switch (latestRec.type) {
           case 'break':
-            startTimer(parseInt(details.match(/\d+/)[0]) || 5);
+            {
+              let minutes = 5;
+              const raw = latestRec.details;
+              if (typeof raw === 'string') {
+                const match = raw.match(/(\d{1,3})/);
+                if (match) minutes = parseInt(match[1]);
+              }
+              if (parsedDetails && typeof parsedDetails === 'object') {
+                if (parsedDetails.durationMinutes && Number(parsedDetails.durationMinutes) > 0) {
+                  minutes = Number(parsedDetails.durationMinutes);
+                } else if (typeof parsedDetails.message === 'string') {
+                  const m2 = parsedDetails.message.match(/(\d{1,3})/);
+                  if (m2) minutes = parseInt(m2[1]);
+                }
+              }
+              startTimer(minutes);
+            }
             break;
           case 'activity':
-            if (details.message.includes('body stretch')) startTimer(2);
-            else if (details.message.includes('walk')) startTimer(10);
-            else if (details.message.includes('eye exercises')) startTimer(2);
-            else if (details.message.includes('meditation')) startTimer(5);
+            {
+              const msg = (parsedDetails && parsedDetails.message) ? parsedDetails.message : (typeof latestRec.details === 'string' ? latestRec.details : '');
+              if (msg.includes('body stretch')) startTimer(2);
+              else if (msg.includes('walk')) startTimer(10);
+              else if (msg.includes('eye exercises')) startTimer(2);
+              else if (msg.includes('meditation')) startTimer(5);
+            }
             break;
           default:
             break;
         }
       }
+
     } catch (err) {
       setError('Failed to update recommendation');
       showToast('Failed to update recommendation', 'error');
@@ -284,36 +330,19 @@ const Dashboard = () => {
     .filter(entry => new Date(entry.date).toISOString().split('T')[0] === todayStr)
     .forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
 
-  // Define varied colors for pie chart that match our UI theme
-  const pieColors = [
-    { bg: 'rgba(71, 85, 105, 0.7)', border: 'rgba(71, 85, 105, 1)' },     // Slate
-    { bg: 'rgba(59, 130, 246, 0.7)', border: 'rgba(59, 130, 246, 1)' },   // Blue
-    { bg: 'rgba(16, 185, 129, 0.7)', border: 'rgba(16, 185, 129, 1)' },   // Emerald
-    { bg: 'rgba(139, 92, 246, 0.7)', border: 'rgba(139, 92, 246, 1)' },   // Violet
-    { bg: 'rgba(245, 158, 11, 0.7)', border: 'rgba(245, 158, 11, 1)' },   // Amber
-    { bg: 'rgba(239, 68, 68, 0.7)', border: 'rgba(239, 68, 68, 1)' },     // Red
-    { bg: 'rgba(236, 72, 153, 0.7)', border: 'rgba(236, 72, 153, 1)' },   // Pink
-    { bg: 'rgba(34, 197, 94, 0.7)', border: 'rgba(34, 197, 94, 1)' },     // Green
-    { bg: 'rgba(168, 85, 247, 0.7)', border: 'rgba(168, 85, 247, 1)' },   // Purple
-    { bg: 'rgba(6, 182, 212, 0.7)', border: 'rgba(6, 182, 212, 1)' },     // Cyan
-    { bg: 'rgba(251, 146, 60, 0.7)', border: 'rgba(251, 146, 60, 1)' },   // Orange
-    { bg: 'rgba(132, 204, 22, 0.7)', border: 'rgba(132, 204, 22, 1)' },   // Lime
-  ];
-
   const pieChartData = {
     labels: Object.keys(tabUsageMap),
     datasets: [{
       label: 'Tab Usage (seconds)',
       data: Object.values(tabUsageMap),
-      backgroundColor: Object.keys(tabUsageMap).map((_, index) => pieColors[index % pieColors.length].bg),
-      borderColor: Object.keys(tabUsageMap).map((_, index) => pieColors[index % pieColors.length].border),
+      backgroundColor: Object.keys(tabUsageMap).map((_, index) => `rgba(71, 85, 105, 0.7)`),
+      borderColor: Object.keys(tabUsageMap).map((_, index) => `rgba(71, 85, 105, 1)`),
       borderWidth: 1,
     }],
   };
 
   const latestRecommendation = recommendations.length > 0 ? recommendations[0] : null;
 
-  // Define period buttons with their display names
   const periodButtons = [
     { value: 'today', label: 'Today' },
     { value: 'yesterday', label: 'Yesterday' },
@@ -348,12 +377,12 @@ const Dashboard = () => {
 
       {/* Quick Connect Section */}
       <div className="max-w-4xl mx-auto text-center">
-        <button 
-          onClick={handleSpotifyConnect} 
+        <button
+          onClick={handleSpotifyConnect}
           className="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors duration-200 shadow-sm font-medium flex items-center justify-center space-x-2 mx-auto"
         >
           <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.062 14.615a.625.625 0 01-.862.225c-2.359-1.439-5.328-1.764-8.828-.961a.625.625 0 11-.312-1.211c3.828-.877 7.172-.496 9.777 1.086a.625.625 0 01.225.861zm1.23-2.738a.781.781 0 01-1.078.281c-2.703-1.652-6.824-2.133-10.02-1.168a.781.781 0 11-.468-1.492c3.656-1.105 8.203-.571 11.285 1.34a.781.781 0 01.281 1.039zm.106-2.85C14.692 8.953 9.348 8.734 6.344 9.668a.937.937 0 11-.562-1.789c3.439-1.07 9.398-.813 12.898 1.461a.937.937 0 11-.937 1.625z"/>
+            <path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm4.062 14.615a.625.625 0 01-.862.225c-2.359-1.439-5.328-1.764-8.828-.961a.625.625 0 11-.312-1.211c3.828-.877 7.172-.496 9.777 1.086a.625.625 0 01.225.861zm1.23-2.738a.781.781 0 01-1.078.281c-2.703-1.652-6.824-2.133-10.02-1.168a.781.781 0 11-.468-1.492c3.656-1.105 8.203-.571 11.285 1.34a.781.781 0 01.281 1.039zm.106-2.85C14.692 8.953 9.348 8.734 6.344 9.668a.937.937 0 11-.562-1.789c3.439-1.07 9.398-.813 12.898 1.461a.937.937 0 11-.937 1.625z" />
           </svg>
           <span>Quick Connect Spotify</span>
         </button>
@@ -465,7 +494,7 @@ const Dashboard = () => {
             </div>
 
             {/* Timer Section */}
-            {(latestRecommendation.type === 'break' || latestRecommendation.type === 'activity') && !actionStatus && (
+            {(latestRecommendation.type === 'break' || latestRecommendation.type === 'activity') && actionStatus === 'accepted' && (
               <div className="text-center border-t border-slate-200 pt-6">
                 {timer !== null ? (
                   <div className="space-y-4">
@@ -477,33 +506,12 @@ const Dashboard = () => {
                       Reset Timer
                     </button>
                   </div>
-                ) : (
-                  <button
-                    onClick={() => {
-                      let duration = 5;
-                      if (latestRecommendation.type === 'break') {
-                        duration = parseInt(latestRecommendation.details.match(/\d+/)[0]) || 5;
-                      } else if (latestRecommendation.type === 'activity') {
-                        duration = latestRecommendation.details.includes('body stretch') ? 2 :
-                          latestRecommendation.details.includes('walk') ? 10 :
-                          latestRecommendation.details.includes('eye exercises') ? 2 :
-                          latestRecommendation.details.includes('meditation') ? 5 : 0;
-                      }
-                      if (duration > 0) startTimer(duration);
-                    }}
-                    className="px-6 py-3 bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition-colors duration-200 shadow-sm font-medium flex items-center space-x-2 mx-auto"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <span>Start Timer</span>
-                  </button>
-                )}
+                ) : null}
               </div>
             )}
 
             {/* Music Player */}
-            {latestRecommendation.type === 'music' && (
+            {latestRecommendation.type === 'music' && actionStatus === 'accepted' && (
               <div className="border-t border-slate-200 pt-6">
                 <SpotifyPlayerComponent
                   latestRecommendation={latestRecommendation}

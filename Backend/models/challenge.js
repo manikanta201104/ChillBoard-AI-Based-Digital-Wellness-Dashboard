@@ -4,6 +4,7 @@ const participantSchema = new mongoose.Schema({
   userId: { type: String, required: true },
   reduction: { type: Number, default: 0 },
   lastUpdate: { type: Number, default: Date.now },
+  joinedAt: { type: Number, default: Date.now },
 });
 
 const challengeSchema = new mongoose.Schema(

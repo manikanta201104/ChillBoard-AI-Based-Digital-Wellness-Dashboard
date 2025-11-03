@@ -122,6 +122,25 @@ router.post('/', authMiddleware, async (req, res) => {
           console.error('Spotify API error:', spotifyError.message);
           recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
         }
+      // 7.1) Movement prompts based on high usage or stressed/tired state
+      } else if (totalTime >= 150 || (['stressed','tired'].includes(mood) && totalTime >= 60)) {
+        // Prefer a short 5-minute walk
+        recommendation = {
+          type: 'activity',
+          details: { message: 'Take a 5-minute walk to reset your focus.', durationMinutes: 5 },
+          trigger: { totalTime: `${Math.round(totalTime)}m`, mood },
+          triggerSource: 'rule',
+          triggerNote: 'Prompted 5-min walk after prolonged usage or stress/tired mood',
+        };
+      } else if (totalTime >= 90) {
+        // Suggest a 5-minute body stretch
+        recommendation = {
+          type: 'activity',
+          details: { message: 'Stretch your body for 5 minutes to reduce strain.', durationMinutes: 5 },
+          trigger: { totalTime: `${Math.round(totalTime)}m`, mood },
+          triggerSource: 'rule',
+          triggerNote: 'Prompted 5-min stretch after extended usage',
+        };
       // 7) Morning routine
       } else if (new Date().getHours() >= 5 && new Date().getHours() < 9) {
         try {
@@ -139,7 +158,22 @@ router.post('/', authMiddleware, async (req, res) => {
           recommendation.triggerNote += ` (Spotify API failed: ${spotifyError.message})`;
         }
       } else {
-        console.log('No matching condition met:', { totalTime, mood });
+        // No strong condition matched: provide a motivational nudge
+        const messages = [
+          'Small steps count. Take a 2-minute stretch and hydrate. You got this!',
+          'Protect your eyes: follow the 20-20-20 rule. Keep going!',
+          'Consistency beats intensity. A short walk can boost your energy.',
+          'Deep breaths. Reset posture. Refocus for the next block.',
+          'Progress > perfection — you are doing great!'
+        ];
+        const pick = messages[Math.floor(Math.random() * messages.length)];
+        recommendation = {
+          type: 'message',
+          details: { message: pick },
+          trigger: { totalTime: `${Math.round(totalTime)}m`, mood },
+          triggerSource: 'rule',
+          triggerNote: 'Motivational message fallback',
+        };
       }
     } else {
       console.log('Missing latestScreenTime or latestMood:', { latestScreenTime, latestMood });
