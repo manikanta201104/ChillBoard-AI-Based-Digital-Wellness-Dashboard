@@ -330,13 +330,40 @@ const Dashboard = () => {
     .filter(entry => new Date(entry.date).toISOString().split('T')[0] === todayStr)
     .forEach(entry => entry.tabs.forEach(tab => tabUsageMap[tab.url] = (tabUsageMap[tab.url] || 0) + tab.timeSpent));
 
+  const pieColorsBg = [
+    'rgba(99, 102, 241, 0.85)',  // indigo-500
+    'rgba(16, 185, 129, 0.85)',  // emerald-500
+    'rgba(245, 158, 11, 0.85)',  // amber-500
+    'rgba(239, 68, 68, 0.85)',   // red-500
+    'rgba(59, 130, 246, 0.85)',  // blue-500
+    'rgba(139, 92, 246, 0.85)',  // violet-500
+    'rgba(20, 184, 166, 0.85)',  // teal-500
+    'rgba(249, 115, 22, 0.85)',  // orange-500
+    'rgba(34, 197, 94, 0.85)',   // green-500
+    'rgba(234, 179, 8, 0.85)',   // yellow-500
+  ];
+  const pieColorsBorder = [
+    'rgba(99, 102, 241, 1)',
+    'rgba(16, 185, 129, 1)',
+    'rgba(245, 158, 11, 1)',
+    'rgba(239, 68, 68, 1)',
+    'rgba(59, 130, 246, 1)',
+    'rgba(139, 92, 246, 1)',
+    'rgba(20, 184, 166, 1)',
+    'rgba(249, 115, 22, 1)',
+    'rgba(34, 197, 94, 1)',
+    'rgba(234, 179, 8, 1)'
+  ];
+
+  const pieLabels = Object.keys(tabUsageMap);
+  const pieDataValues = Object.values(tabUsageMap);
   const pieChartData = {
-    labels: Object.keys(tabUsageMap),
+    labels: pieLabels,
     datasets: [{
       label: 'Tab Usage (seconds)',
-      data: Object.values(tabUsageMap),
-      backgroundColor: Object.keys(tabUsageMap).map((_, index) => `rgba(71, 85, 105, 0.7)`),
-      borderColor: Object.keys(tabUsageMap).map((_, index) => `rgba(71, 85, 105, 1)`),
+      data: pieDataValues,
+      backgroundColor: pieLabels.map((_, i) => pieColorsBg[i % pieColorsBg.length]),
+      borderColor: pieLabels.map((_, i) => pieColorsBorder[i % pieColorsBorder.length]),
       borderWidth: 1,
     }],
   };
