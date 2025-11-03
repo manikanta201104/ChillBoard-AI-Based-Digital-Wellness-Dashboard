@@ -75,6 +75,15 @@ app.patch ('/test-patch', (req, res) => {
   res.status (200).json ({message: 'PATCH request received'});
 });
 
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+
 app.use ('/auth', authRoutes);
 app.use ('/screen-time', screenTimeRoutes);
 app.use ('/mood', moodRoutes);
