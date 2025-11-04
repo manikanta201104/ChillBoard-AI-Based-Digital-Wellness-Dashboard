@@ -149,8 +149,8 @@ router.post('/progress', authMiddleware, async (req, res) => {
 
     // Day-over-day reduction model anchored to participant join date
     const anchorDate = new Date(Math.max(challenge.startDate.getTime(), participant.joinedAt || challenge.startDate.getTime()));
+    const anchorYmd = new Date(anchorDate.toISOString().split('T')[0]);
     const currentDay = new Date(now.toISOString().split('T')[0]);
-    const yesterdayDay = new Date(currentDay.getTime() - 24 * 60 * 60 * 1000);
 
     // Prevent multiple updates in the same day (unless manualTrigger explicitly set to true)
     const lastUpdateDay = new Date(new Date(participant.lastUpdate).toISOString().split('T')[0]);
@@ -159,29 +159,27 @@ router.post('/progress', authMiddleware, async (req, res) => {
       return res.status(204).send('Already updated today');
     }
 
-    // If yesterday is before anchor, we do not compute a delta yet (first day)
-    if (yesterdayDay < new Date(anchorDate.toISOString().split('T')[0])) {
-      logger.info('First day since join; no reduction computed', { challengeId, userId });
-      return res.status(200).json({ message: 'First day since join; no reduction computed' });
-    }
-
+    // Find last available tracked day before currentDay (>= anchor)
+    const prevDoc = await ScreenTime.findOne({ userId, date: { $lt: currentDay, $gte: anchorYmd } }).sort({ date: -1 });
     const todayDoc = await ScreenTime.findOne({ userId, date: currentDay });
-    const yesterdayDoc = await ScreenTime.findOne({ userId, date: yesterdayDay });
 
-    // If data missing for today or yesterday, skip to keep stability
-    if (!todayDoc || !yesterdayDoc) {
-      logger.info('Insufficient day-over-day data, skipping update', { challengeId, userId, hasToday: !!todayDoc, hasYesterday: !!yesterdayDoc });
-      return res.status(200).json({ message: 'Insufficient data for day-over-day update' });
+    if (!prevDoc || !todayDoc) {
+      logger.info('Insufficient data for update (need current day and a previous tracked day since anchor)', { challengeId, userId, hasPrev: !!prevDoc, hasCurrent: !!todayDoc });
+      return res.status(200).json({ message: 'Insufficient data for update' });
     }
 
-    const deltaHours = Math.max(0, (yesterdayDoc.totalTime - todayDoc.totalTime) / 3600);
-    const perDayCapHours = challenge.goal / 60; // goal is in minutes per day
-    const dailyReduction = Math.min(deltaHours, perDayCapHours);
+    // Do not credit reduction for days with 0 screen time (anti-cheat)
+    if ((prevDoc.totalTime || 0) === 0 || (todayDoc.totalTime || 0) === 0) {
+      logger.info('Zero-time detected, skipping reduction', { challengeId, userId, prevDate: prevDoc.date, prevTotal: prevDoc.totalTime, currentTotal: todayDoc.totalTime });
+      return res.status(200).json({ message: 'Skipped day with zero screen time' });
+    }
 
-    const totalReductionHours = Math.min(
-      (participant.reduction / 3600) + dailyReduction,
-      perDayCapHours * challenge.duration
-    );
+    const dayMs = 24 * 60 * 60 * 1000;
+    const gapDays = Math.max(1, Math.round((new Date(currentDay) - new Date(prevDoc.date)) / dayMs));
+    const deltaHours = Math.max(0, (prevDoc.totalTime - todayDoc.totalTime) / 3600);
+    const addedHours = deltaHours; // No per-day or total caps
+
+    const totalReductionHours = (participant.reduction / 3600) + addedHours;
     const newReduction = totalReductionHours * 3600;
 
     if (now.getTime() - participant.lastUpdate >= 3600000 || manualTrigger || lastUpdateDay.getTime() !== currentDay.getTime()) {
@@ -191,9 +189,9 @@ router.post('/progress', authMiddleware, async (req, res) => {
         { new: true, runValidators: true }
       );
       if (!updatedChallenge) throw new Error('Failed to update participant');
-      logger.info('Progress updated (day-over-day)', { challengeId, userId, addedHours: dailyReduction, totalHours: totalReductionHours, timestamp: now });
+      logger.info('Progress updated (uncapped, gap-aware)', { challengeId, userId, addedHours, gapDays, totalHours: totalReductionHours, timestamp: now, prevDate: prevDoc.date, currentDate: currentDay });
       res.status(200).json({
-        message: 'Progress updated (day-over-day)',
+        message: 'Progress updated (uncapped, gap-aware)',
         reduction: totalReductionHours,
       });
     } else {
@@ -282,30 +280,27 @@ cron.schedule('0 0 * * *', async () => {
         const userId = participant.userId;
         const challengeId = challenge.challengeId;
 
-        // Day-over-day calculation (IST midnight triggered)
+        // Gap-aware calculation (IST midnight triggered)
         const anchorDate = new Date(Math.max(challenge.startDate.getTime(), participant.joinedAt || challenge.startDate.getTime()));
+        const anchorYmd = new Date(anchorDate.toISOString().split('T')[0]);
         const currentDay = new Date(now.toISOString().split('T')[0]);
-        const yesterdayDay = new Date(currentDay.getTime() - 24 * 60 * 60 * 1000);
-
-        if (yesterdayDay < new Date(anchorDate.toISOString().split('T')[0])) {
-          logger.info('First day since join; no reduction computed (cron)', { challengeId, userId });
-          continue;
-        }
-
+        const prevDoc = await ScreenTime.findOne({ userId, date: { $lt: currentDay, $gte: anchorYmd } }).sort({ date: -1 });
         const todayDoc = await ScreenTime.findOne({ userId, date: currentDay });
-        const yesterdayDoc = await ScreenTime.findOne({ userId, date: yesterdayDay });
-        if (!todayDoc || !yesterdayDoc) {
-          logger.info('Insufficient day-over-day data (cron), skipping', { challengeId, userId, hasToday: !!todayDoc, hasYesterday: !!yesterdayDoc });
+        if (!prevDoc || !todayDoc) {
+          logger.info('Insufficient data (cron), need current day and a previous tracked day since anchor', { challengeId, userId, hasPrev: !!prevDoc, hasCurrent: !!todayDoc });
           continue;
         }
 
-        const deltaHours = Math.max(0, (yesterdayDoc.totalTime - todayDoc.totalTime) / 3600);
-        const perDayCapHours = challenge.goal / 60;
-        const dailyReduction = Math.min(deltaHours, perDayCapHours);
-        const totalReductionHours = Math.min(
-          (participant.reduction / 3600) + dailyReduction,
-          perDayCapHours * challenge.duration
-        );
+        if ((prevDoc.totalTime || 0) === 0 || (todayDoc.totalTime || 0) === 0) {
+          logger.info('Zero-time detected (cron), skipping reduction', { challengeId, userId, prevDate: prevDoc.date, prevTotal: prevDoc.totalTime, currentTotal: todayDoc.totalTime });
+          continue;
+        }
+
+        const dayMs = 24 * 60 * 60 * 1000;
+        const gapDays = Math.max(1, Math.round((new Date(currentDay) - new Date(prevDoc.date)) / dayMs));
+        const deltaHours = Math.max(0, (prevDoc.totalTime - todayDoc.totalTime) / 3600);
+        const addedHours = deltaHours;
+        const totalReductionHours = (participant.reduction / 3600) + addedHours;
         const newReduction = totalReductionHours * 3600;
 
         await Challenge.findOneAndUpdate(
@@ -313,13 +308,15 @@ cron.schedule('0 0 * * *', async () => {
           { $set: { 'participants.$.reduction': newReduction, 'participants.$.lastUpdate': now.getTime() } },
           { new: true, runValidators: true }
         );
-        logger.info('Daily progress updated (day-over-day)', { 
+        logger.info('Daily progress updated (uncapped, gap-aware)', { 
           challengeId, 
           userId, 
-          addedHours: dailyReduction, 
+          addedHours, 
           totalHours: totalReductionHours, 
           timestamp: now,
           currentDate: currentDay,
+          prevDate: prevDoc.date,
+          gapDays,
         });
       }
     }
