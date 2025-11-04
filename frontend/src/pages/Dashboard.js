@@ -138,6 +138,14 @@ const Dashboard = () => {
     }
   };
 
+  const formatHoursHM = (hoursFloat) => {
+    if (!hoursFloat || isNaN(hoursFloat)) return '0:00';
+    const totalMinutes = Math.round(hoursFloat * 60);
+    const h = Math.floor(totalMinutes / 60);
+    const m = totalMinutes % 60;
+    return `${h}:${m.toString().padStart(2, '0')}`;
+  };
+
   const startTimer = (duration) => {
     const seconds = parseInt(duration) * 60; // Convert minutes to seconds
     setTimer(seconds);
@@ -443,7 +451,7 @@ const Dashboard = () => {
                     <span className="font-medium text-slate-700">{entry.username}</span>
                   </div>
                   <div className="text-slate-600 text-sm font-medium">
-                    {entry.reduction.toFixed(1)} hours reduced
+                    {formatHoursHM(entry.reduction)} hours reduced
                   </div>
                 </div>
               ))}
