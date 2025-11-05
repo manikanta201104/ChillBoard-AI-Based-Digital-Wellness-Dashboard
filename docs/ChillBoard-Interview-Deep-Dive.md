@@ -17,7 +17,7 @@ Version: 1.0
 - Digital fatigue for students/professionals; provides analytics, mood-aware recommendations, community challenges.
 
 2) High-level architecture in 60 seconds?
-- Chrome MV3 Extension (tracking) + React SPA (dashboard) + Express/MongoDB backend + Spotify/AWS SES integrations + CI/CD with Docker and GitHub Actions; frontend on Vercel, backend on Render.
+- Chrome MV3 Extension (tracking) + React SPA (dashboard) + Express/MongoDB backend + Spotify integration + multi-provider email over HTTPS (Brevo primary, optional Resend/SES) + CI/CD with Docker and GitHub Actions; frontend on Vercel, backend on Render.
 
 3) Why a Chrome Extension vs. purely web?
 - Only the extension can reliably track active tab, window focus, and idle state. Web alone can’t observe global browsing.
@@ -135,8 +135,9 @@ Version: 1.0
 34) Spotify token lifecycle?
 - Save tokens with obtainedAt/expiresIn; refresh on BE near expiry; FE retries on 401.
 
-35) AWS SES email delivery?
-- HTTPS API via SESv2; verified sender; templated subject/text/html; fallback provider: Resend.
+35) Email delivery (providers)?
+- HTTPS only, no SMTP. Primary: Brevo (Sendinblue). Optional fallbacks: Resend and AWS SES (SESv2). Shared sender identity (SES_FROM) verified per provider. Templated subject/text/html with a modern OTP card.
+  - Resend policy: fresh OTP on each request except within 60s (idempotent window); 3/hour cap; 5 verify attempts.
 
 36) Docker & GitHub Actions?
 - Backend Dockerfile (prod install, node:20-alpine); GitHub Actions builds/pushes image to GHCR and signs with cosign.
@@ -161,7 +162,7 @@ Version: 1.0
 - Sync storms at 5-min cadence → jitter per client; exponential backoff; server-side rate limiting.
 
 42) Cost controls?
-- SES over SMTP; avoid large payloads; compress responses; cache playlists; limit logs for noisy routes.
+- Use HTTP email APIs with free/low tiers (Brevo primary). Avoid SMTP egress issues. Compress responses; cache playlists; limit noisy logs.
 
 ---
 

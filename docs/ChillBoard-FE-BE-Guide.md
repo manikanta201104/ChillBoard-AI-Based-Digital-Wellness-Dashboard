@@ -13,7 +13,7 @@ Version: 1.0
   - 3.2 Models and Database
   - 3.3 API Endpoints Summary
   - 3.4 Authentication and Authorization
-  - 3.5 Email and Password Reset (SES/Resend)
+  - 3.5 Email and Password Reset (Brevo primary; HTTPS providers)
   - 3.6 Logging, Error Handling, and Limits
   - 3.7 Cron/Scheduling
 - 4. Frontend (React)
@@ -106,15 +106,16 @@ Notes:
 - `authMiddleware` validates tokens for protected routes.
 - Password hashing via bcrypt.
 
-## 3.5 Email and Password Reset (SES/Resend)
+## 3.5 Email and Password Reset (Brevo primary; HTTPS providers)
 
 - Password Reset flow:
-  - Request: store codeHash with TTL, apply rate limits (min 60s, 3/hour/email).
+  - Request: store codeHash with TTL, apply rate limits (min 60s, 3/hour/email). Fresh code is sent on each request, except if last send < 60s (idempotent success window).
   - Verify: compare code (bcrypt) and attempts (max 5).
   - Reset: update hashed password on success.
-- Email delivery:
-  - SES via @aws-sdk/client-sesv2 for production.
-  - Resend HTTP API as an alternate provider.
+- Email delivery (HTTPS APIs only; no SMTP):
+  - Primary: Brevo (Sendinblue) HTTP API.
+  - Optional/Configurable fallbacks: Resend HTTP API, AWS SES (SESv2 client over HTTPS).
+  - Unified sender configured via `SES_FROM` (e.g., `ChillBoard <no-reply@chillboard.in>`), must be verified with each enabled provider.
 
 ## 3.6 Logging, Error Handling, and Limits
 
@@ -189,9 +190,10 @@ Notes:
 - Backend:
   - Core: `MONGO_URI`, `PORT`, `JWT_SECRET`
   - Spotify: `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI`
-  - Email: `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `SES_FROM`
-  - Optional: `RESEND_API_KEY`
-  - Optional SMTP (testing): `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+  - Email (HTTPS providers):
+    - Sender (shared): `SES_FROM`
+    - Primary: `BREVO_API_KEY`
+    - Optional fallbacks: `RESEND_API_KEY`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
   - CORS/URLs: `FRONTEND_URL`, `RENDER_URL`
 - Frontend:
   - `REACT_APP_BACKEND_URL`
@@ -222,7 +224,7 @@ npm start
 
 - 401/403 on protected APIs: check JWT presence/expiry and CORS.
 - Spotify playback fails: ensure premium account and valid token; re-auth if needed.
-- SES email not delivered: verify identities and provider configuration; consider Resend as fallback.
+- Email not delivered: verify sender/domain with provider (Brevo/Resend/SES), check credentials, and logs; enable alternate provider if primary is unavailable.
 - Charts empty: check data availability, extension sync timing, and correct user.
 - CORS issues: ensure backend allows FE origin (e.g., https://www.chillboard.in).
 

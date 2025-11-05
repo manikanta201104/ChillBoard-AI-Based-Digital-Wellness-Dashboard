@@ -44,6 +44,7 @@ App runs on http://localhost:3000 (or your configured dev port).
 - AI wellness features and recommendations
 - Reviews with admin moderation flow
 - Admin panel: users, reviews, challenges, contacts
+- Robust Forgot Password with OTP and multi‑provider email delivery (HTTPS APIs)
 
 ## Documentation
 - docs/Frontend-Backend.md
@@ -67,18 +68,27 @@ App runs on http://localhost:3000 (or your configured dev port).
 
 - Rules & Limits:
   - 6‑digit code, valid for 10 minutes.
-  - Rate‑limit: min 60s between sends, max 3 requests/hour per email.
+  - Resend policy: a fresh code is sent on each request except when the last send was < 60 seconds ago (idempotent success within 60s).
+  - Rate‑limit: max 3 requests/hour per email.
   - Max 5 verification attempts per code.
 
-- SMTP Configuration (Backend/.env):
-  ```env
-  SMTP_HOST=smtp.gmail.com
-  SMTP_PORT=587
-  SMTP_SECURE=false
-  SMTP_USER=your_smtp_username
-  SMTP_PASS=your_smtp_password
-  SMTP_FROM="ChillBoard <no-reply@yourdomain.com>"
-  ```
+- Email Delivery (HTTPS APIs, no SMTP):
+  - Providers: Brevo (primary), optional Resend and AWS SES as fallbacks.
+  - Required env (Backend/.env or Render):
+    ```env
+    # Sender identity used across providers
+    SES_FROM="ChillBoard <no-reply@yourdomain.com>"
+    
+    # Primary provider
+    BREVO_API_KEY=...        # Brevo/Sendinblue API key (v3)
+
+    # Optional fallbacks
+    RESEND_API_KEY=...       # Resend HTTP API key
+    AWS_ACCESS_KEY_ID=...    # If enabling SES
+    AWS_SECRET_ACCESS_KEY=...
+    AWS_REGION=ap-south-1
+    ```
+  - Make sure your From domain/email is verified with each provider you enable. For SES Sandbox, verify recipients or request production.
 
 - Testing with curl:
   ```bash
@@ -98,7 +108,13 @@ App runs on http://localhost:3000 (or your configured dev port).
     -d '{"email":"user@example.com","code":"123456","newPassword":"Newpass123"}'
   ```
 
+- Email template: modern, accessible dark card with large OTP and brief copy (see `Backend/utils/sesMailer.js`).
+
 - Simple HTML helper (dev only): `Backend/templates/forgot_password.html` sends the request from the browser for local testing.
+
+## Policies
+- Email Policy: available at `/email-policy` in the web app UI.
+- Privacy Policy: available at `/privacy`.
 
 ## License
 MIT (add your preferred license)
