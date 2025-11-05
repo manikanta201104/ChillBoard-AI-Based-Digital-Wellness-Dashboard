@@ -10,7 +10,7 @@ const triggerLinkSchema = new mongoose.Schema (
     fromSource: {
       type: String,
       required: true,
-      enum:['mood','screenTime','default'],
+      enum:['mood','screenTime','default','rule','dev_sl'],
     },
     recommendationId: {
       type: String,
