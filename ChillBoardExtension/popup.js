@@ -616,6 +616,184 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       if (loginContainer) loginContainer.style.opacity = '1';
       if (statsContainer) statsContainer.style.opacity = '1';
+      // Initialize Pomodoro UI after base UI is ready
+      try { initPomodoro(); } catch (e) { console.warn('Pomodoro init error', e?.message || e); }
     }
+  }
+
+  // ===== Pomodoro Additive Logic (no removals) =====
+  const POMO_WORK_SEC = 25 * 60;
+  const POMO_SHORT_BREAK_SEC = 5 * 60;
+  const POMO_LONG_BREAK_SEC = 15 * 60;
+  const POMO_LONG_BREAK_EVERY = 4;
+  let pomoInterval = null;
+  let pomoState = {
+    isRunning: false,
+    isBreak: false,
+    timeLeft: POMO_WORK_SEC,
+    sessionCount: 0,
+    cycleCount: 0,
+    lastSavedAt: 0,
+    playlistUrl: null
+  };
+
+  const elPomoTimer = document.getElementById('pomodoro-timer');
+  const elPomoStatus = document.getElementById('pomodoro-status');
+  const elPomoSession = document.getElementById('pomodoro-session');
+  const elPomoStart = document.getElementById('pomodoro-start-btn');
+  const elPomoStop = document.getElementById('pomodoro-stop-btn');
+  const elPomoReset = document.getElementById('pomodoro-reset-btn');
+  const elPomoSkipBreak = document.getElementById('pomodoro-skip-break-btn');
+  const elPomoBreakBanner = document.getElementById('pomodoro-break-banner');
+  const elPomoPlaylistBtn = document.getElementById('pomodoro-playlist-btn');
+  const elPomoConnectSpotifyBtn = document.getElementById('pomodoro-connect-spotify-btn');
+
+  function formatClock(totalSeconds) {
+    const s = Math.max(0, Math.floor(totalSeconds || 0));
+    const mm = String(Math.floor(s / 60)).padStart(2, '0');
+    const ss = String(s % 60).padStart(2, '0');
+    return `${mm}:${ss}`;
+  }
+
+  async function loadPomodoroState() {
+    const data = await getStorageData(['pomodoroState']);
+    if (data && data.pomodoroState) {
+      const saved = data.pomodoroState;
+      // Resume countdown progress if the popup was closed for a short time
+      if (saved.isRunning && saved.lastSavedAt) {
+        const elapsed = Math.floor((Date.now() - saved.lastSavedAt) / 1000);
+        saved.timeLeft = Math.max(0, (saved.timeLeft || 0) - elapsed);
+      }
+      pomoState = { ...pomoState, ...saved };
+    }
+  }
+
+  async function savePomodoroState() {
+    pomoState.lastSavedAt = Date.now();
+    await setStorageData({ pomodoroState: pomoState });
+  }
+
+  function updatePomodoroUI() {
+    if (!elPomoTimer) return;
+    elPomoTimer.textContent = formatClock(pomoState.timeLeft);
+    elPomoStatus.textContent = pomoState.isBreak ? 'Break' : (pomoState.isRunning ? 'Running' : 'Idle');
+    elPomoSession.textContent = `Session ${pomoState.sessionCount}`;
+    if (elPomoBreakBanner) elPomoBreakBanner.style.display = pomoState.isBreak ? 'block' : 'none';
+    if (elPomoPlaylistBtn) elPomoPlaylistBtn.style.display = pomoState.isBreak ? 'inline-block' : 'none';
+    if (elPomoSkipBreak) elPomoSkipBreak.style.display = pomoState.isBreak ? 'inline-block' : 'none';
+  }
+
+  function notifyBackgroundState() {
+    try {
+      chrome.runtime.sendMessage({
+        type: 'POMODORO_STATE',
+        data: { isBreak: pomoState.isBreak, isRunning: pomoState.isRunning, sessionCount: pomoState.sessionCount }
+      });
+    } catch {}
+  }
+
+  function startTicking() {
+    if (pomoInterval) clearInterval(pomoInterval);
+    pomoInterval = setInterval(async () => {
+      if (!pomoState.isRunning) return;
+      pomoState.timeLeft = Math.max(0, (pomoState.timeLeft || 0) - 1);
+      updatePomodoroUI();
+      if (pomoState.lastSavedAt === 0 || (Date.now() - (pomoState.lastSavedAt || 0)) > 5000) {
+        await savePomodoroState();
+      }
+      if (pomoState.timeLeft === 0) {
+        if (!pomoState.isBreak) {
+          // Work session finished
+          pomoState.sessionCount += 1;
+          pomoState.cycleCount = (pomoState.cycleCount + 1) % POMO_LONG_BREAK_EVERY;
+          await startBreak();
+        } else {
+          // Break finished
+          await endBreak();
+        }
+      }
+    }, 1000);
+  }
+
+  async function startWork() {
+    pomoState.isBreak = false;
+    if (!pomoState.timeLeft || pomoState.timeLeft <= 0) pomoState.timeLeft = POMO_WORK_SEC;
+    pomoState.isRunning = true;
+    updatePomodoroUI();
+    notifyBackgroundState();
+    await savePomodoroState();
+    startTicking();
+  }
+
+  async function startBreak() {
+    pomoState.isBreak = true;
+    const longBreak = (pomoState.sessionCount % POMO_LONG_BREAK_EVERY === 0);
+    pomoState.timeLeft = longBreak ? POMO_LONG_BREAK_SEC : POMO_SHORT_BREAK_SEC;
+    pomoState.isRunning = true;
+    updatePomodoroUI();
+    notifyBackgroundState();
+    await savePomodoroState();
+  }
+
+  async function endBreak() {
+    pomoState.isBreak = false;
+    pomoState.timeLeft = POMO_WORK_SEC;
+    pomoState.isRunning = true; // auto-start next work session
+    updatePomodoroUI();
+    notifyBackgroundState();
+    await savePomodoroState();
+  }
+
+  async function stopPomodoro() {
+    pomoState.isRunning = false;
+    updatePomodoroUI();
+    notifyBackgroundState();
+    await savePomodoroState();
+  }
+
+  async function resetPomodoro() {
+    pomoState.timeLeft = pomoState.isBreak ? POMO_SHORT_BREAK_SEC : POMO_WORK_SEC;
+    updatePomodoroUI();
+    await savePomodoroState();
+  }
+
+  async function skipBreak() {
+    if (!pomoState.isBreak) return;
+    await endBreak();
+  }
+
+  async function requestBreakPlaylist() {
+    try {
+      const resp = await sendMessageToBackgroundWithRetry({ action: 'REQUEST_BREAK_PLAYLIST' }, 3, 600);
+      if (resp && resp.success && resp.url) {
+        pomoState.playlistUrl = resp.url;
+        await savePomodoroState();
+        chrome.tabs.create({ url: resp.url });
+      } else if (resp && resp.needsSpotifyAuth) {
+        if (elPomoConnectSpotifyBtn) elPomoConnectSpotifyBtn.style.display = 'inline-block';
+        // Optionally open fallback music so the user still gets a break vibe
+        if (resp.fallbackUrl) chrome.tabs.create({ url: resp.fallbackUrl });
+      }
+    } catch (e) {
+      console.warn('Playlist request failed', e?.message || e);
+    }
+  }
+
+  async function initPomodoro() {
+    if (!elPomoTimer) return; // UI not present
+    await loadPomodoroState();
+    // If popup reopened and state indicated running, continue ticking
+    if (pomoState.isRunning) startTicking();
+    updatePomodoroUI();
+
+    if (elPomoStart) elPomoStart.addEventListener('click', startWork);
+    if (elPomoStop) elPomoStop.addEventListener('click', stopPomodoro);
+    if (elPomoReset) elPomoReset.addEventListener('click', resetPomodoro);
+    if (elPomoSkipBreak) elPomoSkipBreak.addEventListener('click', skipBreak);
+    if (elPomoPlaylistBtn) elPomoPlaylistBtn.addEventListener('click', requestBreakPlaylist);
+    if (elPomoConnectSpotifyBtn) elPomoConnectSpotifyBtn.addEventListener('click', () => {
+      // Open the web app to complete Spotify linking
+      sendMessageToBackgroundWithRetry({ action: 'openWebApp' }, 3, 500);
+    });
   }
 });

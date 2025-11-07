@@ -30,6 +30,22 @@
     <button id="logout-btn">Logout</button>
     <button id="open-webapp-btn">Open Web App</button>
     <p id="loading-message" style="color: blue;"></p>
+    <hr style="margin:12px 0; opacity:0.2;">
+    <div id="pomodoro-container">
+      <h2 style="margin:6px 0; font-size:14px; opacity:0.9;">Pomodoro</h2>
+      <div id="pomodoro-status" style="font-size:12px; opacity:0.8;">Idle</div>
+      <div id="pomodoro-timer" style="font-size:28px; font-weight:600; margin:8px 0;">25:00</div>
+      <div id="pomodoro-session" style="font-size:12px; opacity:0.8;">Session 0</div>
+      <div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">
+        <button id="pomodoro-start-btn">Start</button>
+        <button id="pomodoro-stop-btn">Stop</button>
+        <button id="pomodoro-reset-btn">Reset</button>
+        <button id="pomodoro-skip-break-btn" style="display:none;">Skip Break</button>
+      </div>
+      <div id="pomodoro-break-banner" style="display:none; margin-top:8px; padding:6px; background:rgba(59,130,246,0.1); border:1px solid rgba(59,130,246,0.3); border-radius:6px; font-size:12px;">Break Time!</div>
+      <button id="pomodoro-playlist-btn" style="display:none; margin-top:8px;">Play Relaxing Playlist</button>
+      <button id="pomodoro-connect-spotify-btn" style="display:none; margin-top:8px;">Connect Spotify</button>
+    </div>
   </div>
   <script src="popup.js"></script>
 </body>

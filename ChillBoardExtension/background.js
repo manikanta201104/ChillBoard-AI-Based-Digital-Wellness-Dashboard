@@ -3,6 +3,7 @@ let totalTime = 0;
 let currentTabId = null;
 let tabStartTime = null;
 let tabUsage = []; // Now includes { tabId, url, timeSpent }
+let isTrackingPausedByPomodoro = false; // Pause screen time during Pomodoro breaks
 
 function safeInitialize() {
   if (hasInitialized) return;
@@ -133,7 +134,7 @@ function notifyUser(message, type = 'info') {
 }
 
 function updateTrackingBadge() {
-  if (isAuthenticated && isTracking && currentTabUrl && !(isSystemIdle && !isMediaActive)) {
+  if (isAuthenticated && isTracking && currentTabUrl && !(isSystemIdle && !isMediaActive) && !isTrackingPausedByPomodoro) {
     chrome.action.setBadgeText({ text: '●' });
     chrome.action.setBadgeBackgroundColor({ color: '#10b981' });
     chrome.action.setTitle({ title: `ChillBoard - Tracking: ${currentTabUrl}` });
@@ -416,6 +417,7 @@ function checkFocus() {
 function startTracking() {
   // NEW: do not track unless authenticated
   if (!isAuthenticated) return;
+  if (isTrackingPausedByPomodoro) return; // Respect Pomodoro pause
   if ((isSystemIdle && !isMediaActive) || !currentTabId || !currentTabUrl) return; // Do not start if idle and no media
   isTracking = true;
   tabStartTime = Date.now();
@@ -440,7 +442,7 @@ function stopTracking() {
 function startActiveTabTimer() {
   if (activeTabTimer) clearInterval(activeTabTimer);
   activeTabTimer = setInterval(() => {
-    if (isAuthenticated && isTracking && currentTabId !== null && tabStartTime !== null && currentTabUrl && !(isSystemIdle && !isMediaActive)) updateTabTime();
+    if (isAuthenticated && isTracking && currentTabId !== null && tabStartTime !== null && currentTabUrl && !(isSystemIdle && !isMediaActive) && !isTrackingPausedByPomodoro) updateTabTime();
   }, 1000);
 }
 
@@ -451,7 +453,7 @@ async function updateTabTime() {
     return; // Don't update after reset
   }
 
-  if (!isAuthenticated || !isTracking || !tabStartTime || !currentTabUrl || currentTabId === null || (isSystemIdle && !isMediaActive)) return;
+  if (!isAuthenticated || !isTracking || !tabStartTime || !currentTabUrl || currentTabId === null || (isSystemIdle && !isMediaActive) || isTrackingPausedByPomodoro) return;
 
   const currentTime = Date.now();
   const timeSpent = Math.floor((currentTime - tabStartTime) / 1000);
@@ -749,7 +751,6 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     return true;
   } else if (request.action === 'getScreenTime') {
     sendResponse({ totalTime, tabUsage, isTracking, currentTabUrl });
-    return true;
   } else if (request.action === 'resetData') {
     resetDailyData(new Date().toISOString().split('T')[0]).then(() => sendResponse({ success: true }));
     return true;
@@ -806,8 +807,103 @@ chrome.runtime.onMessage.addListener(async (request, sender, sendResponse) => {
     sendResponse({ success: true, isAuthenticated });
     return true;
   }
+  // Handle additive message types (Pomodoro)
+  if (request && request.type === 'POMODORO_STATE') {
+    try {
+      const prev = isTrackingPausedByPomodoro;
+      isTrackingPausedByPomodoro = !!request.data?.isBreak;
+      if (isTrackingPausedByPomodoro) {
+        if (isAuthenticated && isTracking) {
+          if (tabStartTime && currentTabId !== null && !(isSystemIdle && !isMediaActive)) updateTabTime();
+          stopTracking();
+        }
+      } else {
+        // attempt to resume after break
+        if (isAuthenticated && currentTabId && currentTabUrl && !(isSystemIdle && !isMediaActive)) {
+          startTracking();
+        }
+      }
+      updateTrackingBadge();
+      // optional: prefetch playlist suggestion when entering break
+      if (!prev && isTrackingPausedByPomodoro) {
+        try {
+          const url = await fetchMoodAndPlaylist();
+          if (url) await setStorageData({ lastBreakPlaylistUrl: url });
+        } catch {}
+      }
+      sendResponse({ success: true });
+      return true;
+    } catch (e) {
+      sendResponse({ success: false, error: e?.message || String(e) });
+      return true;
+    }
+  }
+  if (request && request.action === 'REQUEST_BREAK_PLAYLIST') {
+    try {
+      const url = await fetchMoodAndPlaylist();
+      if (typeof url === 'string' && url) {
+        await setStorageData({ lastBreakPlaylistUrl: url });
+        sendResponse({ success: true, url });
+      } else {
+        sendResponse({ success: false, fallbackUrl: 'https://open.spotify.com/genre/chill' });
+      }
+    } catch (e) {
+      const msg = (e?.message || '').toString();
+      if (msg.includes('SPOTIFY_AUTH_REQUIRED')) {
+        sendResponse({ success: false, needsSpotifyAuth: true, fallbackUrl: 'https://open.spotify.com/genre/chill' });
+      } else {
+        sendResponse({ success: false, error: msg || String(e), fallbackUrl: 'https://open.spotify.com/genre/chill' });
+      }
+    }
+    return true;
+  }
   return false;
 });
+
+// Pomodoro helpers
+function pauseTracking() { isTrackingPausedByPomodoro = true; updateTrackingBadge(); }
+function resumeTracking() { isTrackingPausedByPomodoro = false; if (isAuthenticated) startTracking(); updateTrackingBadge(); }
+
+async function fetchMoodAndPlaylist() {
+  try {
+    const { jwt } = await getStorageData(['jwt']);
+    // Mood fetch
+    let mood = 'calm';
+    try {
+      if (jwt) {
+        const moodResp = await fetch('https://chillboard-6uoj.onrender.com/mood/latest', {
+          method: 'GET',
+          headers: jwt ? { 'Authorization': `Bearer ${jwt}` } : {},
+          signal: AbortSignal.timeout(8000)
+        });
+        if (moodResp.ok) {
+          const moodData = await moodResp.json();
+          mood = (moodData?.mood || moodData?.state || 'calm');
+        }
+      }
+    } catch {}
+    // Playlist fetch
+    const url = new URL('https://chillboard-6uoj.onrender.com/spotify/playlist');
+    url.searchParams.set('mood', String(mood || 'calm'));
+    const plResp = await fetch(url.toString(), {
+      method: 'GET',
+      headers: jwt ? { 'Authorization': `Bearer ${jwt}` } : {},
+      signal: AbortSignal.timeout(10000)
+    });
+    if (plResp.ok) {
+      const data = await plResp.json();
+      // Expect { url } or { playlistUrl }
+      return data?.url || data?.playlistUrl || null;
+    } else if (plResp.status === 401) {
+      // Bubble up a specific error to let popup show Connect Spotify CTA
+      throw new Error('SPOTIFY_AUTH_REQUIRED');
+    }
+  } catch (e) {
+    console.warn('Playlist fetch failed', e?.message || e);
+  }
+  // Fallback to generic
+  return 'https://open.spotify.com/genre/chill';
+}
 
 function setupIdleDetection() {
   if (typeof chrome.idle !== 'undefined' && chrome.idle.setDetectionInterval) {
