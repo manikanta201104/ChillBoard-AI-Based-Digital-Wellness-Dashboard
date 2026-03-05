@@ -3,7 +3,7 @@ import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import winston from 'winston';
-import authRoutes from './routes/auth.js';
+import {authRoutes} from './routes/auth.js';
 import screenTimeRoutes from './routes/screenTime.js';
 import moodRoutes from './routes/mood.js';
 import recommendationsRoutes from './routes/recommendations.js';
