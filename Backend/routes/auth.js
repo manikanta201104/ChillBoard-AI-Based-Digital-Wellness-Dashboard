@@ -1,12 +1,14 @@
 import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
+import { config } from "../config/env.js";
 
 const router = express.Router();
 
-// Admin credentials
-const ADMIN_EMAIL = "mettumanikanta098@gmail.com";
-const ADMIN_PASSWORD = "Manikanta20@#";
+// Admin credentials from environment
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "mettumanikanta098@gmail.com";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Manikanta20@#";
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
 // Mock user database
 const users = [];
@@ -15,13 +17,19 @@ const users = [];
 const authenticateJWT = (req, res, next) => {
   const token = req.header("Authorization")?.split(" ")[1];
   if (token) {
-    jwt.verify(token, "your_jwt_secret", (err, user) => {
-      if (err) {
-        return res.sendStatus(403);
-      }
-      req.user = user;
-      next();
-    });
+    try {
+      jwt.verify(token, config.jwtSecret, (err, user) => {
+        if (err) {
+          console.warn("JWT verification failed:", err.message);
+          return res.sendStatus(403);
+        }
+        req.user = user;
+        next();
+      });
+    } catch (error) {
+      console.error("JWT error:", error);
+      return res.sendStatus(403);
+    }
   } else {
     res.sendStatus(401);
   }
@@ -32,24 +40,37 @@ router.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   // Check if admin login
-  if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    const token = jwt.sign(
-      { email, userId: "admin", role: "admin" },
-      "your_jwt_secret",
-      { expiresIn: "1h" },
-    );
-    const refreshToken = jwt.sign(
-      { email, userId: "admin", role: "admin" },
-      "your_jwt_secret",
-      { expiresIn: "7d" },
-    );
-    return res.json({
-      token,
-      refreshToken,
-      userId: "admin",
-      role: "admin",
-      message: "Admin login successful",
-    });
+  if (email === ADMIN_EMAIL) {
+    let passwordMatch = false;
+
+    // If hash is available, use it; otherwise compare plain text (for development)
+    if (ADMIN_PASSWORD_HASH) {
+      passwordMatch = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
+    } else {
+      passwordMatch = password === ADMIN_PASSWORD;
+    }
+
+    if (passwordMatch) {
+      console.log("Admin login successful for:", email);
+      const token = jwt.sign(
+        { email, userId: "admin", role: "admin" },
+        config.jwtSecret,
+        { expiresIn: "1h" },
+      );
+      const refreshToken = jwt.sign(
+        { email, userId: "admin", role: "admin" },
+        config.jwtSecret,
+        { expiresIn: "7d" },
+      );
+      console.log("Generated admin tokens");
+      return res.json({
+        token,
+        refreshToken,
+        userId: "admin",
+        role: "admin",
+        message: "Admin login successful",
+      });
+    }
   }
 
   // Look for user in DB (mocked for this example)
@@ -57,12 +78,12 @@ router.post("/login", async (req, res) => {
   if (user && (await bcrypt.compare(password, user.password))) {
     const token = jwt.sign(
       { email: user.email, userId: `user_${Date.now()}`, role: "user" },
-      "your_jwt_secret",
+      config.jwtSecret,
       { expiresIn: "1h" },
     );
     const refreshToken = jwt.sign(
       { email: user.email, userId: `user_${Date.now()}`, role: "user" },
-      "your_jwt_secret",
+      config.jwtSecret,
       { expiresIn: "7d" },
     );
     return res.json({
@@ -101,18 +122,18 @@ router.post("/refresh", async (req, res) => {
   }
 
   try {
-    const decoded = jwt.verify(refreshToken, "your_jwt_secret");
+    const decoded = jwt.verify(refreshToken, config.jwtSecret);
 
     // Generate new tokens
     const newToken = jwt.sign(
       { userId: decoded.userId, email: decoded.email, role: decoded.role },
-      "your_jwt_secret",
+      config.jwtSecret,
       { expiresIn: "1h" },
     );
 
     const newRefreshToken = jwt.sign(
       { userId: decoded.userId, email: decoded.email, role: decoded.role },
-      "your_jwt_secret",
+      config.jwtSecret,
       { expiresIn: "7d" },
     );
 
@@ -123,6 +144,15 @@ router.post("/refresh", async (req, res) => {
   } catch (error) {
     return res.status(401).json({ message: "Invalid refresh token" });
   }
+});
+
+// Profile endpoint
+router.get("/profile", authenticateJWT, (req, res) => {
+  res.json({
+    userId: req.user.userId,
+    email: req.user.email,
+    role: req.user.role,
+  });
 });
 
 // Admin login HTML page
