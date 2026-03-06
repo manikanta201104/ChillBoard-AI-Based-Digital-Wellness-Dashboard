@@ -165,36 +165,41 @@ router.get("/admin-login", (req, res) => {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Login - ChillBoard</title>
     <style>
-        body { font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; }
+        body { font-family: Arial, sans-serif; max-width: 400px; margin: 100px auto; padding: 20px; background: #f8fafc; }
         .form-group { margin-bottom: 15px; }
-        label { display: block; margin-bottom: 5px; }
-        input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; }
-        button { background: #475569; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; width: 100%; }
-        button:hover { background: #334155; }
-        .error { color: red; margin-top: 10px; }
-        .success { color: green; margin-top: 10px; }
-        .info { background: #f0f9ff; padding: 15px; border-radius: 4px; margin-bottom: 20px; border-left: 4px solid #0ea5e9; }
+        label { display: block; margin-bottom: 5px; font-weight: 600; color: #374151; }
+        input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; }
+        input:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
+        button { background: #3b82f6; color: white; padding: 12px 20px; border: none; border-radius: 6px; cursor: pointer; width: 100%; font-size: 14px; font-weight: 600; }
+        button:hover { background: #2563eb; }
+        .error { color: #dc2626; margin-top: 10px; padding: 10px; background: #fef2f2; border-radius: 6px; border: 1px solid #fecaca; }
+        .success { color: #059669; margin-top: 10px; padding: 10px; background: #ecfdf5; border-radius: 6px; border: 1px solid #a7f3d0; }
+        .info { background: #eff6ff; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #3b82f6; }
+        .container { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); }
+        h1 { text-align: center; margin-bottom: 30px; color: #1f2937; font-size: 24px; }
     </style>
 </head>
 <body>
-    <h1>Admin Login</h1>
-    <div class="info">
-        <strong>Admin Credentials:</strong><br>
-        Email: mettumanikanta098@gmail.com<br>
-        Password: Manikanta20@#
+    <div class="container">
+        <h1>Admin Login</h1>
+        <div class="info">
+            <strong>Admin Credentials:</strong><br>
+            Email: mettumanikanta098@gmail.com<br>
+            Password: Manikanta20@#
+        </div>
+        <form id="loginForm">
+            <div class="form-group">
+                <label for="email">Email:</label>
+                <input type="email" id="email" name="email" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password:</label>
+                <input type="password" id="password" name="password" required>
+            </div>
+            <button type="submit">Login</button>
+        </form>
+        <div id="message"></div>
     </div>
-    <form id="loginForm">
-        <div class="form-group">
-            <label for="email">Email:</label>
-            <input type="email" id="email" name="email" required>
-        </div>
-        <div class="form-group">
-            <label for="password">Password:</label>
-            <input type="password" id="password" name="password" required>
-        </div>
-        <button type="submit">Login</button>
-    </form>
-    <div id="message"></div>
 
     <script>
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -213,11 +218,16 @@ router.get("/admin-login", (req, res) => {
                 const data = await response.json();
                 
                 if (response.ok) {
-                    messageDiv.innerHTML = '<div class="success">Login successful! Token: ' + data.token + '</div>';
-                    localStorage.setItem('adminToken', data.token);
+                    messageDiv.innerHTML = '<div class="success">Login successful! Redirecting to admin dashboard...</div>';
+                    localStorage.setItem('jwt', data.token);
+                    localStorage.setItem('refreshToken', data.refreshToken);
+                    localStorage.setItem('userId', data.userId);
+                    localStorage.setItem('role', data.role);
+                    
+                    // Redirect to frontend admin dashboard
                     setTimeout(() => {
-                        window.location.href = '/dashboard';
-                    }, 2000);
+                        window.location.href = 'https://www.chillboard.in/admin';
+                    }, 1500);
                 } else {
                     messageDiv.innerHTML = '<div class="error">' + data.message + '</div>';
                 }
@@ -228,7 +238,7 @@ router.get("/admin-login", (req, res) => {
     </script>
 </body>
 </html>
-    `);
+  `);
 });
 
 export default router;
