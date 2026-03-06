@@ -33,17 +33,45 @@ router.post("/login", async (req, res) => {
 
   // Check if admin login
   if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-    const token = jwt.sign({ email }, "your_jwt_secret", { expiresIn: "1h" });
-    return res.json({ token });
+    const token = jwt.sign(
+      { email, userId: "admin", role: "admin" },
+      "your_jwt_secret",
+      { expiresIn: "1h" },
+    );
+    const refreshToken = jwt.sign(
+      { email, userId: "admin", role: "admin" },
+      "your_jwt_secret",
+      { expiresIn: "7d" },
+    );
+    return res.json({
+      token,
+      refreshToken,
+      userId: "admin",
+      role: "admin",
+      message: "Admin login successful",
+    });
   }
 
   // Look for user in DB (mocked for this example)
   const user = users.find((user) => user.email === email);
   if (user && (await bcrypt.compare(password, user.password))) {
-    const token = jwt.sign({ email: user.email }, "your_jwt_secret", {
-      expiresIn: "1h",
+    const token = jwt.sign(
+      { email: user.email, userId: `user_${Date.now()}`, role: "user" },
+      "your_jwt_secret",
+      { expiresIn: "1h" },
+    );
+    const refreshToken = jwt.sign(
+      { email: user.email, userId: `user_${Date.now()}`, role: "user" },
+      "your_jwt_secret",
+      { expiresIn: "7d" },
+    );
+    return res.json({
+      token,
+      refreshToken,
+      userId: `user_${Date.now()}`,
+      role: "user",
+      message: "Login successful",
     });
-    return res.json({ token });
   }
 
   res.status(401).json({ message: "Invalid credentials" });
@@ -62,6 +90,39 @@ router.get("/dashboard", authenticateJWT, (req, res) => {
   res.json({
     message: "Welcome to the protected dashboard, " + req.user.email,
   });
+});
+
+// Refresh token endpoint
+router.post("/refresh", async (req, res) => {
+  const { refreshToken } = req.body;
+
+  if (!refreshToken) {
+    return res.status(401).json({ message: "Refresh token required" });
+  }
+
+  try {
+    const decoded = jwt.verify(refreshToken, "your_jwt_secret");
+
+    // Generate new tokens
+    const newToken = jwt.sign(
+      { userId: decoded.userId, email: decoded.email, role: decoded.role },
+      "your_jwt_secret",
+      { expiresIn: "1h" },
+    );
+
+    const newRefreshToken = jwt.sign(
+      { userId: decoded.userId, email: decoded.email, role: decoded.role },
+      "your_jwt_secret",
+      { expiresIn: "7d" },
+    );
+
+    res.json({
+      token: newToken,
+      refreshToken: newRefreshToken,
+    });
+  } catch (error) {
+    return res.status(401).json({ message: "Invalid refresh token" });
+  }
 });
 
 // Admin login HTML page
