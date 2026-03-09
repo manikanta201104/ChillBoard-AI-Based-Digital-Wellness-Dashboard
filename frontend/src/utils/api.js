@@ -203,20 +203,23 @@ export const getUserPlaylists = async () => {
   return response.data;
 };
 
-export const saveSettings = async (settingsData) => {
-  const response = await api.post("/auth/settings", settingsData);
-  return response.data;
-};
+// Settings API functions - DISABLED
+// All settings functionality has been disabled
 
-export const getUserSettings = async () => {
-  const response = await api.get("/auth/user/settings");
-  return response.data;
-};
+// export const saveSettings = async (settingsData) => {
+//   const response = await api.post("/auth/settings", settingsData);
+//   return response.data;
+// };
 
-export const patchUserSettings = async (settingsData) => {
-  const response = await api.patch("/auth/user/settings", settingsData);
-  return response.data;
-};
+// export const getUserSettings = async () => {
+//   const response = await api.get("/auth/user/settings");
+//   return response.data;
+// };
+
+// export const patchUserSettings = async (settingsData) => {
+//   const response = await api.patch("/auth/user/settings", settingsData);
+//   return response.data;
+// };
 
 // Admin: list challenges with pagination
 export const adminListChallenges = async (page = 1, limit = 10) => {

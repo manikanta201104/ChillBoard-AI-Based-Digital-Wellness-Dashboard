@@ -2,6 +2,7 @@ import express from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { config } from "../config/env.js";
+import User from "../models/user.js";
 
 const router = express.Router();
 
@@ -100,10 +101,69 @@ router.post("/login", async (req, res) => {
 
 // Signup route
 router.post("/signup", async (req, res) => {
-  const { email, password } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
-  users.push({ email, password: hashedPassword });
-  res.status(201).json({ message: "User created" });
+  const { email, password, username } = req.body;
+
+  try {
+    // Generate username from email if not provided
+    const generatedUsername = username || email.split("@")[0];
+
+    // Check if user already exists
+    const existingUser = await User.findOne({
+      $or: [{ email }, { username: generatedUsername }],
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        message: "User already exists with this email or username",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create new user in database
+    const newUser = new User({
+      userId: `user_${Date.now()}`,
+      username: generatedUsername,
+      email,
+      password: hashedPassword,
+    });
+
+    await newUser.save();
+
+    // Generate tokens for new user
+    const token = jwt.sign(
+      {
+        email,
+        userId: newUser.userId,
+        role: "user",
+        username: generatedUsername,
+      },
+      config.jwtSecret,
+      { expiresIn: "1h" },
+    );
+    const refreshToken = jwt.sign(
+      {
+        email,
+        userId: newUser.userId,
+        role: "user",
+        username: generatedUsername,
+      },
+      config.jwtSecret,
+      { expiresIn: "7d" },
+    );
+
+    res.status(201).json({
+      token,
+      refreshToken,
+      userId: newUser.userId,
+      username: generatedUsername,
+      role: "user",
+      message: "User created successfully",
+    });
+  } catch (error) {
+    console.error("Signup error:", error);
+    res.status(500).json({ message: "Failed to create user" });
+  }
 });
 
 // Protected route example
@@ -148,9 +208,15 @@ router.post("/refresh", async (req, res) => {
 
 // Profile endpoint
 router.get("/profile", authenticateJWT, (req, res) => {
+  // Extract username from email or use userId as fallback
+  const username = req.user.email
+    ? req.user.email.split("@")[0]
+    : req.user.userId;
+
   res.json({
     userId: req.user.userId,
     email: req.user.email,
+    username: username,
     role: req.user.role,
   });
 });

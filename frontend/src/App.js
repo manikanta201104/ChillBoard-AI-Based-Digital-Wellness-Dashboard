@@ -3,7 +3,7 @@ import Landing from './pages/Landing';
 import Dashboard from './pages/Dashboard';
 import Challenges from './pages/Challenges';
 import Profile from './pages/Profile';
-import Settings from './pages/Settings';
+// import Settings from './pages/Settings';
 import About from './pages/About';
 import Navbar from './components/Navbar';
 import Footer from './components/Footer';
@@ -57,7 +57,7 @@ function App() {
           <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/challenges" element={<Challenges />} />
           <Route path="/profile" element={<Profile />} />
-          <Route path="/settings" element={<Settings />} />
+          {/* <Route path="/settings" element={<Settings />} /> */}
           <Route path="/about" element={<About />} />
           <Route path="/privacy" element={<Privacy />} />
           <Route path="/email-policy" element={<EmailPolicy />} />
