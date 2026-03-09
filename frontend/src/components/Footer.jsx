@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 export default function Footer() {
   const year = new Date().getFullYear();
   return (
-    <footer className="mt-12 border-t border-slate-600 bg-slate-700 sticky bottom-0 z-40 w-full">
+    <footer className="mt-12 border-t border-slate-600 bg-slate-700 bottom-0 z-40 w-full">
       <div className="max-w-6xl mx-auto px-6 py-8 grid gap-6 md:grid-cols-3 text-slate-300">
         <div>
           <h3 className="text-white font-semibold">ChillBoard</h3>
