@@ -11,9 +11,6 @@ const ADMIN_EMAIL = process.env.ADMIN_EMAIL || "mettumanikanta098@gmail.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "Manikanta20@#";
 const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
 
-// Mock user database
-const users = [];
-
 // Middleware to authenticate JWT
 const authenticateJWT = (req, res, next) => {
   const token = req.header("Authorization")?.split(" ")[1];
@@ -74,24 +71,35 @@ router.post("/login", async (req, res) => {
     }
   }
 
-  // Look for user in DB (mocked for this example)
-  const user = users.find((user) => user.email === email);
+  // Look for user in database
+  const user = await User.findOne({ email });
   if (user && (await bcrypt.compare(password, user.password))) {
     const token = jwt.sign(
-      { email: user.email, userId: `user_${Date.now()}`, role: "user" },
+      {
+        email: user.email,
+        userId: user.userId,
+        role: "user",
+        username: user.username,
+      },
       config.jwtSecret,
       { expiresIn: "1h" },
     );
     const refreshToken = jwt.sign(
-      { email: user.email, userId: `user_${Date.now()}`, role: "user" },
+      {
+        email: user.email,
+        userId: user.userId,
+        role: "user",
+        username: user.username,
+      },
       config.jwtSecret,
       { expiresIn: "7d" },
     );
     return res.json({
       token,
       refreshToken,
-      userId: `user_${Date.now()}`,
+      userId: user.userId,
       role: "user",
+      username: user.username,
       message: "Login successful",
     });
   }
