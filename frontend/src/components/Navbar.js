@@ -1,14 +1,14 @@
-import React from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 const Navbar = () => {
   const navigate = useNavigate();
 
   const handleLogout = () => {
     // Clear authentication data (e.g., remove userId from localStorage)
-    localStorage.removeItem('userId');
-    localStorage.removeItem('jwt'); // Assuming you store JWT token
-    navigate('/'); // Redirect to landing page
+    localStorage.removeItem("userId");
+    localStorage.removeItem("jwt"); // Assuming you store JWT token
+    navigate("/"); // Redirect to landing page
   };
 
   return (
@@ -25,41 +25,35 @@ const Navbar = () => {
               </div> */}
               <span className="text-white font-medium text-lg">ChillBoard</span>
             </div>
-            
+
             {/* Navigation Links */}
             <div className="hidden md:flex space-x-1">
-              <Link 
-                to="/dashboard" 
+              <Link
+                to="/dashboard"
                 className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
               >
                 Dashboard
               </Link>
-              <Link 
-                to="/challenges" 
+              <Link
+                to="/challenges"
                 className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
               >
                 Challenges
               </Link>
-              <Link 
-                to="/profile" 
+              <Link
+                to="/profile"
                 className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
               >
                 Profile
               </Link>
-              <Link 
-                to="/settings" 
-                className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
-              >
-                Settings
-              </Link>
-              <Link 
-                to="/about" 
+              <Link
+                to="/about"
                 className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
               >
                 About
               </Link>
-              <Link 
-                to="/privacy" 
+              <Link
+                to="/privacy"
                 className="px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm font-medium"
               >
                 Privacy
@@ -73,8 +67,18 @@ const Navbar = () => {
               onClick={handleLogout}
               className="px-4 py-2 bg-slate-600 text-white rounded-lg hover:bg-slate-500 transition-colors duration-200 text-sm font-medium flex items-center space-x-2 shadow-sm"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
+                />
               </svg>
               <span>Logout</span>
             </button>
@@ -82,8 +86,18 @@ const Navbar = () => {
             {/* Mobile Menu Button */}
             <div className="md:hidden">
               <button className="p-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
                 </svg>
               </button>
             </div>
@@ -92,32 +106,26 @@ const Navbar = () => {
 
         {/* Mobile Menu (Hidden by default - would need state to toggle) */}
         <div className="md:hidden border-t border-slate-600 py-3 space-y-1">
-          <Link 
-            to="/dashboard" 
+          <Link
+            to="/dashboard"
             className="block px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm"
           >
             Dashboard
           </Link>
-          <Link 
-            to="/challenges" 
+          <Link
+            to="/challenges"
             className="block px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm"
           >
             Challenges
           </Link>
-          <Link 
-            to="/profile" 
+          <Link
+            to="/profile"
             className="block px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm"
           >
             Profile
           </Link>
-          <Link 
-            to="/settings" 
-            className="block px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm"
-          >
-            Settings
-          </Link>
-          <Link 
-            to="/about" 
+          <Link
+            to="/about"
             className="block px-4 py-2 text-slate-300 hover:text-white hover:bg-slate-600 rounded-lg transition-colors duration-200 text-sm"
           >
             About
